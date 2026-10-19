@@ -1,13 +1,13 @@
-# catshop — the reference steps
+# catshop — the reference examples
 
-Six directories. Each one **runs on its own**, and each differs from the previous by exactly the
+Seven directories. Each one **runs on its own**, and each differs from the previous by exactly the
 thing it teaches. Read them in order, `diff` them against each other, run them.
 
 This repo is **reference material you read**. Your graded work goes in your own lab repository.
 
 ## The application
 
-One small Flask app, **byte-identical in all six directories** (`md5 */app.py` to prove it). Three
+One small Flask app, **byte-identical in all seven directories** (`md5 */app.py` to prove it). Three
 endpoints, deliberately chosen to depend on three different kinds of thing:
 
 | Endpoint | Depends on | Appears in |
@@ -19,11 +19,12 @@ endpoints, deliberately chosen to depend on three different kinds of thing:
 The app never learns about volumes, networks or stubs. **Its composition does.** That is the whole
 argument of this repo.
 
-## The six steps
+## The seven steps
 
 | Step | Directory | Adds | The moment |
 |---|---|---|---|
 | 1 | `1-dockerfile/` | `Dockerfile`, `.dockerignore` | ten instructions, each with a consequence. `EXPOSE` publishes nothing |
+| 1a | `1a-cache/` | a cache mount, five variants to measure, `cache.sh` | one **unused** file in the folder, and every dependency reinstalls. **6 s → 0 s** on the same edit |
 | 1b | `1b-dockerfile-multistage/` | a second `FROM` | **684 MB → 253 MB.** The single-stage image ships a C compiler to production |
 | 2 | `2-compose-postgres-no-volume/` | `compose.yaml`, `init-db/` | a real database — and `down`/`up` **still loses every row** |
 | 3 | `3-compose-postgres-volume/` | a named volume | three lines of YAML, and the data survives |
@@ -34,7 +35,7 @@ Each directory has its own `README.md` with the commands, the expected output, a
 
 ## Running a step
 
-**Step 1 is a single image — no Compose:**
+**Steps 1 and 1a are a single image — no Compose:**
 
 ```bash
 cd 1-dockerfile
@@ -42,6 +43,15 @@ docker build -t catshop:step1 .
 docker run -d --name step1 -p 8080:8080 catshop:step1
 curl localhost:8080/health
 docker rm -f step1
+```
+
+**Step 1a is measured, not served.** It builds the app six ways and prints what the cache did;
+nothing to `curl`:
+
+```bash
+cd 1a-cache
+./cache.sh                                        # eight acts, with timings
+docker buildx build --progress=plain -t catshop:cache-good .   # watch each node decide
 ```
 
 **Steps 2 to 5 use Compose:**
@@ -54,7 +64,7 @@ curl localhost:8080/visits
 docker compose down           # add -v to delete the volume too
 ```
 
-> **One at a time.** All six publish host port `8080`. Bring the previous step down first, or
+> **One at a time.** Every step that runs a container publishes host port `8080`. Bring the previous step down first, or
 > `docker ps --filter publish=8080` will tell you who is holding it.
 
 ## Seeing what each step changed
@@ -67,6 +77,15 @@ diff -ru -x README.md -x .env 2-compose-postgres-no-volume 3-compose-postgres-vo
 ```
 
 Step 2 → 3 comes out as **one mount plus one `volumes:` key**. That is persistence, entire.
+
+Step 1 → 1a is **one instruction**, and it is the only thing that step changes:
+
+```bash
+diff -u 1-dockerfile/Dockerfile 1a-cache/Dockerfile
+```
+
+1a is a measurement lab on step 1's image and is deliberately **not** in the lineage: step 1b
+continues from step 1, with `--no-cache-dir` rather than the cache mount.
 
 For step 1b, compare inside the folder instead — the same dependencies built two ways:
 
@@ -102,6 +121,11 @@ Every claim in these READMEs was executed on a real daemon (Docker 29.8.2):
 | step 4 — `/price/MK-II` → 200 · `/price/BOOM-1` → **502** · `/price/SLOW-1` → **502 after 2.017 s** | all three failure modes on demand |
 | step 5 — db unreachable from host · app→db by name ok · db→internet no route · partner→internet no route | isolation holds |
 | step 1b — `ms:single` **684 MB** with `gcc 14.2.0`; `ms:multi` **253 MB** with no gcc | 2.7×, same app |
+| step 1a — one line of `app.py` edited: dependencies-first **0 s** (4/5 cached), source-first **6 s** (2/4, pip reran) | ordering is the whole of build performance |
+| step 1a — one **unused** file created: source-first **5 s**, dependencies-first **0 s** (5/5) | the build context is an input, whether you use the file or not |
+| step 1a — `touch` leaves the cache intact; `chmod 600` breaks it and reruns the install | mtime is not in the key, mode is |
+| step 1a — `pip install` layer **42.5 MB** in-image vs **34.4 MB** with a cache mount holding **8.126 MB** | the difference is the wheel cache, to the byte |
+| step 1a — `split-apt` **649 MB** vs `one-layer` **611 MB** | a later `rm` frees nothing |
 
 ## Secrets
 
