@@ -1,0 +1,66 @@
+# Step 5 — the same three services, with explicit networks. Nothing else changes.
+name: catshop-step5
+services:
+  app:
+    build: .
+    image: catshop:step5
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Setting DATABASE_URL is the entire change in the application.
+      # `db` is a hostname that only exists because Compose made a network for us —
+      # step 5 is where we stop taking that for granted.
+      DATABASE_URL: postgresql://shop:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/shop
+      # The partner's base URL is CONFIGURATION. That single fact is what makes the
+      # real API swappable for a stub — in Compose here, and in pytest later.
+      PARTNER_URL: http://partner:8080
+      PARTNER_TIMEOUT: "2"
+
+    depends_on:
+      db:
+        condition: service_healthy
+    # The ONLY service on more than one network. That is precisely what makes it
+    # the only path between the outside world, the database and the partner.
+    networks: [frontend, backend, partnernet]
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # A NAMED volume: Docker manages it, it lives outside the container, and it
+      # survives `down`. postgres:18+ moved the layout — mount /var/lib/postgresql there.
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [backend]
+
+  # The "third party". In production this is someone else's server, with its own
+  # outages, rate limits and 3 a.m. deploys. Here it is WireMock replaying ./partner/mappings.
+  partner:
+    image: wiremock/wiremock:3.6.0
+    command: ["--verbose", "--disable-banner"]
+    volumes:
+      - ./partner/mappings:/home/wiremock/mappings:ro
+    networks: [partnernet]
+
+volumes:
+  pgdata:
+
+networks:
+  # A user-defined bridge: containers on it resolve each other BY NAME through
+  # Docker's embedded DNS at 127.0.0.11. The default bridge has no DNS at all.
+  frontend:
+  backend:
+    # internal: true removes the gateway. The database can talk to the app and to
+    # nothing else — no updates, no telemetry, no exfiltration.
+    internal: true
+  partnernet:
+    internal: true

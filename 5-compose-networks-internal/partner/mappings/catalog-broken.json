@@ -1,0 +1,5 @@
+{
+  "priority": 1,
+  "request": { "method": "GET", "urlPathPattern": "/v1/catalog/BOOM-.*" },
+  "response": { "status": 500, "body": "partner exploded\n" }
+}

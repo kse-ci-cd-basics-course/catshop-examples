@@ -1,0 +1,8 @@
+{
+  "request": { "method": "GET", "urlPathPattern": "/v1/catalog/.*" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "sku": "MK-II", "price": "1234.56", "currency": "UAH" }
+  }
+}

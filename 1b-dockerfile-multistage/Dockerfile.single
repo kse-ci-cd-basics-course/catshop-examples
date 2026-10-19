@@ -1,0 +1,22 @@
+# The single-stage image most projects actually ship.
+# Nothing here is stupid — each line was added for a reason, once, by someone in a hurry.
+FROM python:3.12-slim
+
+# A dependency needed a compiler at install time, so the compiler went in.
+# It never came out, because removing it later would break the next person's build.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 10001 app \
+ && mkdir -p /data && chown app:app /data
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+
+USER app
+ENV PORT=8080 PYTHONUNBUFFERED=1
+EXPOSE 8080
+CMD ["python", "app.py"]

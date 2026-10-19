@@ -1,0 +1,10 @@
+{
+  "priority": 1,
+  "request": { "method": "GET", "urlPathPattern": "/v1/catalog/SLOW-.*" },
+  "response": {
+    "status": 200,
+    "fixedDelayMilliseconds": 5000,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "sku": "SLOW", "price": "1.00", "currency": "UAH" }
+  }
+}
