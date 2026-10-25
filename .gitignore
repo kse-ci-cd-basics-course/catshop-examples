@@ -5,3 +5,6 @@ __pycache__/
 data/
 *.dump
 .DS_Store
+
+# transient, created and removed by 1a-cache/cache.sh — only lingers if a run is killed
+gotcha.txt

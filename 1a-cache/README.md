@@ -54,10 +54,10 @@ purpose and restores them on exit, including on `Ctrl-C`.
 |---|---|---|---|
 | 1 | nothing | **0 s**, CACHED 5/5 | — |
 | 2 | `touch app.py` | **0 s**, CACHED 5/5 | — |
-| 3 | one line of `app.py` | **0 s**, CACHED 4/5 — only `COPY app.py` | **6 s**, CACHED 2/4 — **pip reran** |
-| 4 | `echo "ha, got ya" > gotcha.txt` | **0 s**, CACHED 5/5 | **5 s**, CACHED 2/4 — **pip reran** |
-| 5 | same file, now in `.dockerignore` | — | **1 s**, CACHED 4/4 |
-| 6 | `chmod 600 requirements.txt` | **3 s**, CACHED 2/5 — **pip reran** | — |
+| 3 | one line of `app.py` | **0 s**, CACHED 4/5 — only `COPY app.py` reran | **5 s**, CACHED 2/4 — **pip reran** |
+| 4 | one new file, `gotcha.txt` | **0 s**, CACHED 5/5 | **5 s**, CACHED 2/4 — **pip reran** |
+| 5 | that file, now in `.dockerignore` | — | **0 s**, CACHED 4/4 |
+| 6 | `chmod 600 requirements.txt`, contents untouched | **3 s**, CACHED 2/5 — **pip reran** | — |
 
 **Act 4 is the moment.** `gotcha.txt` is not imported, not read, not referenced anywhere in the
 application. It is one unused file sitting next to the code. The source-first build reinstalled
@@ -69,16 +69,21 @@ a miss means rebuilt. The dependencies-first Dockerfile never saw the file at al
 two files, by name.
 
 **Act 5 is the fix, and it is one line.** Put the file outside the build context and it cannot
-appear in any key. That is why `.dockerignore` is a build-performance file and not only a
-hygiene file.
+appear in any key, however often you change it. Watch *which* cache it hits: ignoring the file
+makes the context byte-identical to the context from before the file existed, so the build walks
+straight back into the baseline's layers. That is why `.dockerignore` is a build-performance
+file and not only a hygiene file.
 
-**Act 6 is the asymmetry.** `chmod` changed no byte of `requirements.txt`, and the install below
-it still reran. Mode is in the key; mtime is not.
+**Act 6 is the asymmetry.** It builds twice: once to establish a fresh baseline, then again
+after `chmod 600` with **not one byte of the file changed**. The second build misses on
+`COPY requirements.txt` and reruns the install. Mode is in the key; mtime is not.
 
-The script picks the mode from a pool instead of always using `600`, and the reason is worth
-saying out loud: **BuildKit keeps every variant it has ever built**, not just the most recent
-one. Flip the mode back to one you built an hour ago and the build hits the cache. Keys are
-content-addressed, so a cache hit is a lookup, never a comparison against "last time".
+That act is also why the script stamps a run id into everything it touches, which is worth
+saying out loud to the room: **BuildKit keeps every variant it has ever built**, not just the
+most recent one. A cache hit is a *lookup* of a key, never a comparison against "last time". So
+re-creating last week's `gotcha.txt`, or flipping a file back to a mode you once built, is a
+hit. Without fresh inputs each run this script would stop demonstrating anything on its second
+run — and would still print cheerful `CACHED` lines while doing it.
 
 ## What the cache mount actually buys
 

@@ -1,0 +1,91 @@
+# Step 8 — contexts, `if:`, and `uses:`.
+#
+# `diff -ru -x README.md 7-ci-jobs-and-env 8-ci-contexts-and-if` is this file.
+#
+# Three ideas:
+#   * a context is a thing that becomes true at a known moment
+#   * `if:` is the same expression language, and a missing `if:` is `success()`
+#   * `uses:` is owner/repo/path@ref — four parts, each a real thing on GitHub
+name: example-08
+
+# Scoped to this example's folder: editing step 7 never re-runs step 6.
+# That path filter is itself the lesson, not plumbing.
+on:
+  push:
+    paths: ['8-ci-contexts-and-if/**', '.github/workflows/example-08.yml']
+  pull_request:
+    paths: ['8-ci-contexts-and-if/**', '.github/workflows/example-08.yml']
+  workflow_dispatch:
+
+# Every `run:` happens inside the example's directory.
+defaults:
+  run:
+    working-directory: 8-ci-contexts-and-if
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.name_it.outputs.tag }}
+    steps:
+      # uses: owner / repo / @ref. Pinned to a tag here; a full SHA is the only
+      # ref nobody can move under you.
+      - uses: actions/checkout@v4
+
+      - name: what exists before a machine was involved
+        run: |
+          echo "event   ${{ github.event_name }}"
+          echo "ref     ${{ github.ref_name }}"
+          echo "actor   ${{ github.actor }}"
+
+      - name: what only exists now that a machine does
+        run: |
+          echo "os      ${{ runner.os }}"
+          echo "status  ${{ job.status }}"
+
+      - name: reading something that is not there is not an error
+        run: echo "vars.NOPE is [${{ vars.NOPE }}] — empty string, no warning"
+
+      - name: a step with an id can be read by later steps
+        id: name_it
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: ...and now steps.* has something in it
+        run: echo "tag ${{ steps.name_it.outputs.tag }}"
+
+  conditions:
+    needs: inspect
+    runs-on: ubuntu-latest
+    env:
+      COUNTER_FILE: /tmp/visits.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: only on the default branch
+        if: github.ref == 'refs/heads/main'
+        run: echo "this is the branch we would publish from"
+
+      - name: only for a pull request
+        if: github.event_name == 'pull_request'
+        run: echo "PR #${{ github.event.number }} into ${{ github.base_ref }}"
+
+      - name: the tests
+        id: tests
+        run: python -m pytest tests -q
+
+      - name: this step has no if:, so it is success() and will be skipped on red
+        run: echo "the tests passed"
+
+      - name: always() runs even when something above failed
+        if: always()
+        run: |
+          echo "### tests ${{ steps.tests.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "build ${{ needs.inspect.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"

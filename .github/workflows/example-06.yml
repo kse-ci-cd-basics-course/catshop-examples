@@ -1,0 +1,54 @@
+# Step 6 — build the application and test it. Nothing is published.
+#
+# One job, because one job is all this needs. The image, the registry and the
+# digest are step 7 and step 8; putting them here would mean a red test still
+# produced an image, which is the bug the next steps exist to prevent.
+name: example-06
+
+# Scoped to this example's folder: editing step 7 never re-runs step 6.
+# That path filter is itself the lesson, not plumbing.
+on:
+  push:
+    paths: ['6-ci-build-test/**', '.github/workflows/example-06.yml']
+  pull_request:
+    paths: ['6-ci-build-test/**', '.github/workflows/example-06.yml']
+  workflow_dispatch:
+
+# Every `run:` happens inside the example's directory.
+defaults:
+  run:
+    working-directory: 6-ci-build-test
+
+# Start from nothing and add only what the job needs. The default is wider.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Job-level env: every step below sees these, and nothing outside does.
+    env:
+      COUNTER_FILE: /tmp/visits.txt
+      PARTNER_TIMEOUT: "0.25"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip                      # the dependency cache, for free
+
+      - name: build the application
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: test it
+        run: python -m pytest tests -q
+
+      - name: say so on the summary page
+        if: always()                      # even when the tests just failed
+        run: |
+          echo "### tests ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

@@ -19,6 +19,11 @@ note()   { printf '\033[0;36m    %s\033[0m\n' "$*"; }
 moment() { printf '\033[1;33m    >> %s\033[0m\n' "$*"; }
 
 MARKER='# touched by cache.sh'
+# Every mutation below carries this run id. Without it the acts stop biting on
+# the second run of the script: BuildKit keeps every variant it has ever built,
+# so re-creating last run's gotcha.txt or re-applying last run's file mode is a
+# cache HIT, and the demo silently turns into a demo of nothing.
+RUN_ID=$(date +%Y%m%d-%H%M%S)-$$
 
 # This script edits app.py, requirements.txt and .dockerignore on purpose, and
 # an interrupted run must not leave them edited.
@@ -35,12 +40,17 @@ MARKER='# touched by cache.sh'
 strip_edits() {
   local f="$1" pattern="$2" tmp
   tmp=$(mktemp)
-  grep -v "$pattern" "$f" > "$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
+  # `cat >` rather than `mv`, so the original file keeps its own permissions.
+  # mktemp creates 0600 files, and moving one into place would silently leave
+  # .dockerignore at 0600 while its siblings in every other step are 0644.
+  if grep -v "$pattern" "$f" > "$tmp"; then cat "$tmp" > "$f"; fi
+  rm -f "$tmp"
 }
 
 cleanup() {
   rm -f gotcha.txt
   strip_edits app.py "^${MARKER}"
+  strip_edits requirements.txt "^${MARKER}"
   strip_edits .dockerignore '^gotcha\.txt$'
   chmod 644 app.py requirements.txt
 }
@@ -131,7 +141,7 @@ strip_edits app.py "^${MARKER}"
 say "ACT 4 · create one unrelated file. HA, GOT YA"
 build "source first, baseline" Dockerfile.source-first "$BAD"
 build "dependencies first, baseline" Dockerfile "$GOOD"
-echo "ha, got ya" > gotcha.txt
+echo "ha, got ya — $RUN_ID" > gotcha.txt
 build "source first, + gotcha.txt" Dockerfile.source-first "$BAD"
 build "dependencies first, + gotcha.txt" Dockerfile "$GOOD"
 moment "gotcha.txt is not imported, not read, not used by the app at all."
@@ -142,25 +152,31 @@ note "Dependencies-first never saw the file: it copies two files, by name."
 say "ACT 5 · the fix — take the file out of the build context"
 echo 'gotcha.txt' >> .dockerignore
 build "source first, now ignored" Dockerfile.source-first "$BAD"
-echo "ha, got ya again" >> gotcha.txt
+echo "ha, got ya again — $RUN_ID" >> gotcha.txt
 build "source first, file changed again" Dockerfile.source-first "$BAD"
-moment "Cached. Outside the context, COPY cannot see it, so it cannot enter a key."
+moment "Both cached — and note WHICH cache they hit: the one from the baseline"
+moment "build, before gotcha.txt existed. Ignoring the file made the context"
+moment "byte-identical to a context BuildKit had already seen."
+note "Outside the context, COPY cannot see the file, so it cannot enter a key —"
+note "no matter how often you change it."
 note ".dockerignore is a build-performance file, not only a hygiene file."
 strip_edits .dockerignore '^gotcha\.txt$' 
 
 say "ACT 6 · chmod requirements.txt — contents stay byte-identical"
-# A mode picked from a pool rather than a fixed 600, because BuildKit keeps every
-# variant it has ever built: the second run of this script would otherwise find
-# the mode-600 layer already cached and the act would quietly stop biting.
-MODES=(600 640 604 660 620 602 664 606)
-MODE=${MODES[$((RANDOM % ${#MODES[@]}))]}
-chmod "$MODE" requirements.txt
-build "after chmod $MODE" Dockerfile "$GOOD"
+# A comment line is valid in requirements.txt and installs the same packages.
+# It gives this act a content baseline BuildKit has never built, so the mode
+# flip that follows is guaranteed to be a genuine miss rather than a lookup of
+# some earlier run's layer.
+printf '%s %s\n' "$MARKER" "$RUN_ID" >> requirements.txt
+build "new content, mode 644" Dockerfile "$GOOD"
+chmod 600 requirements.txt
+build "same bytes, mode 600" Dockerfile "$GOOD"
 moment "The COPY missed, so the install below it reran. Permissions ARE in the key."
 note "Compare with ACT 2: content untouched in both. mtime is free, mode is not."
 note "Flip the mode BACK to one you have built before and it hits the cache again:"
 note "keys are content-addressed, so every variant stays, not just the last one."
 chmod 644 requirements.txt
+strip_edits requirements.txt "^${MARKER}"
 
 say "ACT 7 · what the cache mount actually buys — size, not time"
 build "pip cache left in the layer" Dockerfile.pip-in-layer catshop:pip-in-layer --no-cache

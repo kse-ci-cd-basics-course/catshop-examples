@@ -1,13 +1,13 @@
 # catshop — the reference examples
 
-Seven directories. Each one **runs on its own**, and each differs from the previous by exactly the
+Eleven directories. Each one **runs on its own**, and each differs from the previous by exactly the
 thing it teaches. Read them in order, `diff` them against each other, run them.
 
 This repo is **reference material you read**. Your graded work goes in your own lab repository.
 
 ## The application
 
-One small Flask app, **byte-identical in all seven directories** (`md5 */app.py` to prove it). Three
+One small Flask app, **byte-identical in all eleven directories** (`md5 */app.py` to prove it). Three
 endpoints, deliberately chosen to depend on three different kinds of thing:
 
 | Endpoint | Depends on | Appears in |
@@ -24,7 +24,7 @@ argument of this repo.
 | Step | Directory | Adds | The moment |
 |---|---|---|---|
 | 1 | `1-dockerfile/` | `Dockerfile`, `.dockerignore` | ten instructions, each with a consequence. `EXPOSE` publishes nothing |
-| 1a | `1a-cache/` | a cache mount, five variants to measure, `cache.sh` | one **unused** file in the folder, and every dependency reinstalls. **6 s → 0 s** on the same edit |
+| 1a | `1a-cache/` | a cache mount, five variants to measure, `cache.sh` | one **unused** file in the folder, and every dependency reinstalls. **5 s → 0 s** on the same edit |
 | 1b | `1b-dockerfile-multistage/` | a second `FROM` | **684 MB → 253 MB.** The single-stage image ships a C compiler to production |
 | 2 | `2-compose-postgres-no-volume/` | `compose.yaml`, `init-db/` | a real database — and `down`/`up` **still loses every row** |
 | 3 | `3-compose-postgres-volume/` | a named volume | three lines of YAML, and the data survives |
@@ -121,7 +121,7 @@ Every claim in these READMEs was executed on a real daemon (Docker 29.8.2):
 | step 4 — `/price/MK-II` → 200 · `/price/BOOM-1` → **502** · `/price/SLOW-1` → **502 after 2.017 s** | all three failure modes on demand |
 | step 5 — db unreachable from host · app→db by name ok · db→internet no route · partner→internet no route | isolation holds |
 | step 1b — `ms:single` **684 MB** with `gcc 14.2.0`; `ms:multi` **253 MB** with no gcc | 2.7×, same app |
-| step 1a — one line of `app.py` edited: dependencies-first **0 s** (4/5 cached), source-first **6 s** (2/4, pip reran) | ordering is the whole of build performance |
+| step 1a — one line of `app.py` edited: dependencies-first **0 s** (4/5 cached), source-first **5 s** (2/4, pip reran) | ordering is the whole of build performance |
 | step 1a — one **unused** file created: source-first **5 s**, dependencies-first **0 s** (5/5) | the build context is an input, whether you use the file or not |
 | step 1a — `touch` leaves the cache intact; `chmod 600` breaks it and reruns the install | mtime is not in the key, mode is |
 | step 1a — `pip install` layer **42.5 MB** in-image vs **34.4 MB** with a cache mount holding **8.126 MB** | the difference is the wheel cache, to the byte |
@@ -132,3 +132,42 @@ Every claim in these READMEs was executed on a real daemon (Docker 29.8.2):
 `.env` is git-ignored in this repo and must stay that way. `.env.example` carries a placeholder
 (`POSTGRES_PASSWORD=change-me-locally`) and is the only one of the two that is ever committed.
 This applies to your own lab repository too, and it is checked.
+
+
+---
+
+## Steps 6 and 7 — the pipeline
+
+The first two directories where a machine that is not yours runs the code. The application
+is carried from step 1 **byte for byte**: `md5 */app.py` still prints one hash.
+
+| Step | Adds | The one claim |
+|---|---|---|
+| `6-ci-build-test/` | `.github/workflows/ci.yml`, `tests/` | build the application and test it. **Nothing is published** |
+| `7-ci-jobs-and-env/` | three jobs, `needs:`, `env:` at three levels, job outputs | a job is a machine that gets destroyed, so a value crosses only through an output |
+| `8-ci-contexts-and-if/` | the contexts, `if:`, `uses:` anatomy | a context becomes true at a moment, and reading one too early is an **empty string, not an error** |
+| `9-ci-events/` | the four triggers worth knowing, plus `repository_dispatch` | "merge" is not an event, and a run does not need a commit behind it |
+
+### Where the workflows live
+
+**GitHub only reads workflows from the repository root**, so every runnable example is in
+`.github/workflows/example-NN.yml`, each scoped to its own folder with `paths:`. Editing
+step 7 never re-runs step 6 — and that path filter is itself the lesson.
+
+```bash
+diff -u .github/workflows/example-06.yml .github/workflows/example-07.yml
+```
+
+```bash
+diff -ru -x README.md 6-ci-build-test 7-ci-jobs-and-env     # one file
+diff -ru -x README.md -x .github 1-dockerfile 6-ci-build-test   # only CI is new
+```
+
+Run the tests the way the pipeline does, before you trust the pipeline:
+
+```bash
+cd 6-ci-build-test
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+COUNTER_FILE=/tmp/visits.txt python -m pytest tests -q      # 4 passed
+```

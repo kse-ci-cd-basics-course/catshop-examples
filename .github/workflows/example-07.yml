@@ -1,0 +1,113 @@
+# Step 7 — more than one job, and where a value lives.
+#
+# `diff -ru -x README.md 6-ci-build-test 7-ci-jobs-and-env` is this file and this
+# file only. The application is byte-identical. Again.
+#
+# Three ideas, and nothing else:
+#   * needs:   the order AND the channel between jobs
+#   * env:     three levels, nearest one wins
+#   * outputs: the only way a value leaves a machine that is about to be destroyed
+name: example-07
+
+# Scoped to this example's folder: editing step 7 never re-runs step 6.
+# That path filter is itself the lesson, not plumbing.
+on:
+  push:
+    paths: ['7-ci-jobs-and-env/**', '.github/workflows/example-07.yml']
+  pull_request:
+    paths: ['7-ci-jobs-and-env/**', '.github/workflows/example-07.yml']
+  workflow_dispatch:
+
+# Every `run:` happens inside the example's directory.
+defaults:
+  run:
+    working-directory: 7-ci-jobs-and-env
+
+permissions:
+  contents: read
+
+# Workflow level: every job in this file sees it, unless it says otherwise.
+env:
+  APP: catshop
+  PARTNER_TIMEOUT: "0.25"
+
+jobs:
+  # ── 1 · decide ────────────────────────────────────────────────────────────
+  # Cheap, fast, and it produces the facts the other jobs need. A step writes to
+  # $GITHUB_OUTPUT; the JOB must re-export it under `outputs:` or nothing leaves.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.name_it.outputs.tag }}
+      is_main: ${{ steps.name_it.outputs.is_main }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: work out what to call this build
+        id: name_it
+        run: |
+          echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "is_main=${{ github.ref == 'refs/heads/main' }}" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"        # it is a text file. Look at it
+
+  # ── 2 · test ──────────────────────────────────────────────────────────────
+  test:
+    needs: decide
+    runs-on: ubuntu-latest
+
+    # Job level: shadows the workflow's APP for these steps only.
+    env:
+      APP: catshop-ci
+      COUNTER_FILE: /tmp/visits.txt
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: build the application
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: which APP won
+        env:
+          APP: catshop-probe          # step level: nearest wins, so this one
+        run: |
+          echo "APP is $APP"
+          echo "the job said catshop-ci, the workflow said catshop"
+
+      - name: test it
+        run: python -m pytest tests -q
+
+      - name: the tag came from the other machine
+        run: echo "building ${{ needs.decide.outputs.tag }}"
+
+  # ── 3 · package ───────────────────────────────────────────────────────────
+  # Runs ONLY if `test` succeeded. That one word is what makes "the build fails
+  # when a test fails" true rather than something you hope is true.
+  package:
+    needs: [decide, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build the image — still not pushing it anywhere
+        run: docker build -t "${{ env.APP }}:${{ needs.decide.outputs.tag }}" .
+
+      - name: prove it runs
+        run: |
+          docker run -d --name probe -p 8080:8080 \
+            -e COUNTER_FILE=/tmp/visits.txt \
+            "${{ env.APP }}:${{ needs.decide.outputs.tag }}"
+          for i in $(seq 1 20); do curl -fsS localhost:8080/health && break; sleep 1; done
+          docker rm -f probe
+
+      - name: report
+        if: always()
+        run: |
+          echo "### ${{ env.APP }} ${{ needs.decide.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "main branch? ${{ needs.decide.outputs.is_main }}" >> "$GITHUB_STEP_SUMMARY"
