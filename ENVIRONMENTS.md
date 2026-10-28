@@ -34,8 +34,11 @@ passes only the address — `VAULT_ROLE`.
 > A pipeline secret is a credential for **deploying**. An application secret is a credential for
 > **running**, and the pipeline should never see it.
 
-## The opt-in sandbox deploy
+## What a pull request may reach
 
-On a pull request, `deploy-sandbox` runs only if the PR carries the label **`deploy:sandbox`**.
-Create the label once. Adding it re-triggers the workflow, which is what `types: [labeled]` is
-for.
+`sandbox` and `stage`. **Not production** — that job carries
+`if: github.ref == 'refs/heads/main'`, so there is no label, no approval and no mistake that
+lets a pull request deploy it.
+
+Set **deployment branches** on each environment too, so the rule is enforced by GitHub and not
+only by the file: `sandbox` and `stage` allow any branch, `production` allows `main` only.

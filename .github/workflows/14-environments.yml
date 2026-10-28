@@ -1,22 +1,20 @@
 # The delivery pipeline. One file, two shapes, decided by what triggered it.
 #
-#   on main   build ─> sandbox ─> qa-sandbox ─> stage ─> qa-stage ─> prod ─> qa-prod
-#   on a PR   build ─> sandbox ─> qa-sandbox        (and only if you ask for it)
+#   on main   build ─> sandbox ─> stage ─> production
+#   on a PR   build ─> sandbox ─> stage              production is main only
 #
-# Each environment runs its OWN test pack against its OWN host, and each gate is
-# a plain `needs:` — which carries an implicit `&& success()`, so a red
-# qa-sandbox stops stage before it starts. That default is a nuisance in
-# 10-message-routes.yml and exactly what we want here.
+# Each deploy job ends with its OWN qa run, in the same job — if the checks
+# fail, the deploy job is red, and the next environment never starts. The gate
+# is the plain `needs:`, which carries an implicit `&& success()`.
 #
-# The sandbox deploy on a pull request is opt-in: add the `deploy:sandbox`
-# label. That is what `types: [labeled]` is for.
+# The qa steps are one shared composite action that takes the environment as an
+# input, instead of three near-identical jobs: .github/actions/qa
 #
 # Environments to create: ENVIRONMENTS.md
 name: 14 · delivery
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
 
@@ -35,83 +33,46 @@ jobs:
       - uses: ./.github/actions/install-and-test        # unit tests
       - run: docker build -t catshop:${{ github.sha }} ci-base-app
 
-  # ── sandbox ────────────────────────────────────────────────────────────────
-  deploy-sandbox:
+  sandbox:
     needs: build
-    # on main always; on a pull request only when somebody asked for it
-    if: >-
-      github.ref == 'refs/heads/main'
-      || contains(github.event.pull_request.labels.*.name, 'deploy:sandbox')
     runs-on: ubuntu-latest
     environment:
       name: sandbox
       url: ${{ vars.APP_HOST }}
     steps:
+      - uses: actions/checkout@v4                      # the qa action needs the repo
       - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
+      - uses: ./.github/actions/qa
+        with:
+          environment: sandbox
+          host: ${{ vars.APP_HOST }}
 
-  qa-sandbox:
-    needs: deploy-sandbox
-    runs-on: ubuntu-latest
-    environment: sandbox
-    steps:
-      - uses: actions/checkout@v4
-      - name: the sandbox pack, against the sandbox host
-        run: |
-          echo "smoke + contract against ${{ vars.APP_HOST }}"
-          curl -fsS --max-time 10 "${{ vars.APP_HOST }}/health" || echo "(no host yet)"
-
-  # ── stage · main only ──────────────────────────────────────────────────────
-  deploy-stage:
-    # no `if:` for the gate — this plain `needs:` IS the gate. A failed or
-    # skipped qa-sandbox never satisfies it, so stage never starts.
-    needs: [build, qa-sandbox]
-    if: github.ref == 'refs/heads/main'
+  stage:
+    needs: sandbox            # red qa in sandbox, and this never starts
     runs-on: ubuntu-latest
     environment:
       name: stage
       url: ${{ vars.APP_HOST }}
     steps:
-      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
-
-  qa-stage:
-    needs: deploy-stage
-    runs-on: ubuntu-latest
-    environment: stage
-    steps:
       - uses: actions/checkout@v4
-      - name: the stage pack — slower, and it talks to the partner
-        run: |
-          echo "end-to-end against ${{ vars.APP_HOST }}"
-          sleep 5
-          echo "42 scenarios, 0 failed"
+      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
+      - uses: ./.github/actions/qa
+        with:
+          environment: stage
+          host: ${{ vars.APP_HOST }}
 
-  # ── production ─────────────────────────────────────────────────────────────
-  deploy-prod:
-    needs: [build, qa-stage]
-    if: github.ref == 'refs/heads/main'
+  production:
+    needs: [build, stage]
+    if: github.ref == 'refs/heads/main'      # a pull request stops at stage
     runs-on: ubuntu-latest
-    # the required reviewer lives on the ENVIRONMENT, not here. The run reaches
-    # this job and waits.
+    # the required reviewer lives on the environment, not here
     environment:
       name: production
       url: ${{ vars.APP_HOST }}
     steps:
-      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
-
-  qa-prod:
-    needs: [build, deploy-prod]
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
       - uses: actions/checkout@v4
-      - name: production gets tested too — after the deploy, not instead of it
-        run: |
-          curl -fsS --max-time 10 "${{ vars.APP_HOST }}/health" || echo "(no host yet)"
-          echo "read-only checks only: no test writes to production"
-
-      - run: |
-          {
-            echo "### ${{ needs.build.outputs.tag }} is live"
-            echo ""
-            echo "sandbox -> stage -> production, each one tested before the next"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
+      - uses: ./.github/actions/qa
+        with:
+          environment: production
+          host: ${{ vars.APP_HOST }}

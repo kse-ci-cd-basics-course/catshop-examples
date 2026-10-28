@@ -41,7 +41,7 @@ GitHub reads**:
 | `08-on-main.yml` | the other half of chapter 01. A merge is not an event — it arrives as a push, in a different file, on a different commit, and only this one may deploy |
 | `09-from-outside.yml` | the cron that hopes, replaced — `repository_dispatch` and a run with no commit behind it |
 | `10-message-routes.yml` | 02:00, production down. `build → qa-testing → deploy`, and `[hotfix]` **skips the twenty-minute qa stage** and deploys. The `if:` on `deploy` is the lesson: `needs` hides an `&& success()`, so a skipped stage has to be allowed on purpose |
-| `14-environments.yml` | **the delivery pipeline.** `build → sandbox → qa-sandbox → stage → qa-stage → prod → qa-prod` on main; on a pull request it stops after the sandbox, and only if you label it. `ENVIRONMENTS.md` has the setup |
+| `14-environments.yml` | **the delivery pipeline.** `build → sandbox → stage → production` on main; a pull request stops at stage. Each deploy job runs its own qa through one shared action. `ENVIRONMENTS.md` has the setup |
 | `11-anchors.yml` | `&` defines, `*` repeats — and the wrong fix for chapter 03, because an anchor never leaves its file |
 | `15-reuse.yml` | **both units of reuse in one screen** — a composite action used as a step, a reusable workflow used as a job |
 | `13-artifacts.yml` | **what a run leaves behind** — a JUnit report, an HTML coverage report, and the image itself as a tarball, handed to a later job without publishing anything |
@@ -50,17 +50,26 @@ GitHub reads**:
 ### The delivery pipeline
 
 ```
-on main    build ─> sandbox ─> qa-sandbox ─> stage ─> qa-stage ─> prod ─> qa-prod
-on a PR    build ─> sandbox ─> qa-sandbox      (only with the deploy:sandbox label)
+on main    build ─> sandbox ─> stage ─> production
+on a PR    build ─> sandbox ─> stage            production is main only
 ```
 
-Every gate is a plain `needs:`. It carries an implicit `&& success()`, so a red `qa-sandbox`
-stops `stage` before it starts — the same default that is a nuisance in `10-message-routes.yml`
-and exactly what is wanted here. Each environment runs **its own** test pack against **its own**
-host, and production is tested too: `qa-prod` runs *after* the deploy, read-only.
+**The qa run lives inside its deploy job**, not beside it: deploy, then check, in one job. A
+failed check makes that job red, and the next environment never starts — the gate is the plain
+`needs:`, which carries an implicit `&& success()`. The same default that is a nuisance in
+`10-message-routes.yml` and exactly what is wanted here.
 
-The sandbox deploy on a pull request is opt-in — add the `deploy:sandbox` label. That is what
-`types: [labeled]` is for.
+**One shared qa action, not three jobs.** `.github/actions/qa` takes the environment as an input
+and a step-level `if:` decides the depth: smoke everywhere, the contract pack anywhere that is
+not production, end-to-end on stage, and read-only checks on production — because no test writes
+to production.
+
+```yaml
+      - uses: ./.github/actions/qa
+        with:
+          environment: stage
+          host: ${{ vars.APP_HOST }}
+```
 
 ### A pipeline secret is not an application secret
 
@@ -103,7 +112,7 @@ Showing the filter on its own just looks like extra typing.
 `pages: write` and `id-token: write`, and the second one is OIDC where you can see it: the deploy
 holds no key, it asks GitHub to vouch for the run.
 
-### `.github/actions/install-and-test/`
+### `.github/actions/`
 
-A **composite action**: your own steps, behind one `uses:`, running on the caller's
+`install-and-test` and `qa` — both **composite actions**: your own steps, behind one `uses:`, running on the caller's
 machine. Chapters 03–06, the reusable workflow and `10-message-routes.yml` all use it.

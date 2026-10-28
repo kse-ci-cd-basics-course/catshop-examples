@@ -1,0 +1,53 @@
+# One QA pack, three environments. The environment decides what runs.
+#
+# Written as a composite action and not as three jobs, because the steps are
+# the same shape everywhere and only the depth changes. A step-level `if:` on
+# an input is all it takes.
+name: qa
+description: Run the checks that suit this environment
+
+inputs:
+  environment:
+    description: sandbox · stage · production
+    required: true
+  host:
+    description: the base URL to test
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # everywhere: is it up, and is it the build we just deployed
+    - name: smoke
+      shell: bash
+      run: |
+        curl -fsS --max-time 10 "${{ inputs.host }}/health"
+        curl -fsS --max-time 10 "${{ inputs.host }}/ready"
+
+    # not in production: this one writes
+    - name: contract
+      if: inputs.environment != 'production'
+      shell: bash
+      run: |
+        curl -fsS --max-time 10 "${{ inputs.host }}/visits"
+        echo "state moves, and the partner contract holds"
+
+    # stage is the one that talks to the real partner
+    - name: end-to-end
+      if: inputs.environment == 'stage'
+      shell: bash
+      run: |
+        echo "full pack against ${{ inputs.host }}"
+        sleep 5
+        echo "42 scenarios, 0 failed"
+
+    # production is tested read-only. No test writes to production.
+    - name: production checks
+      if: inputs.environment == 'production'
+      shell: bash
+      run: |
+        curl -fsS --max-time 10 "${{ inputs.host }}/price/MK-II" > /dev/null
+        echo "read-only. If this needed a write, it would not belong here"
+
+    - shell: bash
+      run: echo "qa ${{ inputs.environment }} — ok" >> "$GITHUB_STEP_SUMMARY"
