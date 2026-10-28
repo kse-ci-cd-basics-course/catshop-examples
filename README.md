@@ -58,6 +58,12 @@ on a PR    build ─> image ─> sandbox ─> stage            production is mai
 exports `ghcr.io/<repo>@sha256:…`, so **every environment deploys the same bytes** — a tag can
 be moved between sandbox and production, a digest cannot.
 
+**`needs:` is also what draws the run graph**, one arrow per entry. Every job here names only
+its immediate predecessor and **re-exports the image reference for the next one**, so the graph
+is a clean chain. Writing `needs: [image, stage]` because you want `needs.image.outputs…` also
+works — and adds an edge that jumps two jobs and turns the picture into a cat's cradle. Reading
+an output costs an edge, so pass values down the chain instead.
+
 **The qa run lives inside its deploy job**, not beside it: deploy, then check, in one job. A
 failed check makes that job red, and the next environment never starts — the gate is the plain
 `needs:`, which carries an implicit `&& success()`. The same default that is a nuisance in
