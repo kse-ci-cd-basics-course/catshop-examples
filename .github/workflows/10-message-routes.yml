@@ -1,0 +1,85 @@
+# 02:00, production is down, and qa-testing takes twenty minutes.
+# `[hotfix]` skips it and deploys. A smaller promise, not a shortcut.
+#
+# The trap is the `if:` on deploy. `needs` hides an `&& success()`, and skipped
+# does not satisfy it — so skipped has to be allowed on purpose. A required
+# check counts skipped as passed: a commit message through branch protection.
+name: 10 · the message decides
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      hotfix: ${{ steps.read.outputs.hotfix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # read it once, in one place, and let every job below use the answer
+      - id: read
+        name: what did you type
+        run: |
+          msg=$(git log -1 --pretty=%s)
+          echo "message: $msg"
+          if printf '%s' "$msg" | grep -q '\[hotfix\]'; then
+            echo "hotfix=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "hotfix=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/install-and-test      # unit tests run either way
+      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+
+  qa-testing:
+    needs: build
+    if: needs.build.outputs.hotfix == 'false'
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
+      - uses: actions/checkout@v4
+
+      # the slow stage. In the real pipeline this is the partner stub, the
+      # end-to-end pack and a human looking at a dashboard.
+      - name: end-to-end against the partner stub
+        run: |
+          echo "bringing up the stub, running the pack against ${{ vars.APP_HOST }}"
+          sleep 5
+          echo "42 scenarios, 0 failed"
+
+  deploy:
+    needs: [build, qa-testing]
+    # `!cancelled()` turns off the hidden `&& success()`. Then say exactly what
+    # is required: the build must be green, and qa must be anything that is not
+    # a failure — which is how `skipped` becomes acceptable, on purpose, in one
+    # readable line instead of by accident.
+    if: >-
+      !cancelled()
+      && needs.build.result == 'success'
+      && needs.qa-testing.result != 'failure'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: say which promise this deploy is carrying
+        run: |
+          if [ "${{ needs.build.outputs.hotfix }}" = true ]; then
+            echo "::warning::hotfix path — qa-testing was skipped, watch the dashboard"
+          fi
+          echo "qa-testing reported: ${{ needs.qa-testing.result }}"
+
+      - name: deploy
+        run: echo "deploying ${{ github.sha }} to ${{ vars.APP_HOST }}"
+
+      - run: |
+          {
+            echo "| stage | result |"
+            echo "|---|---|"
+            echo "| qa-testing | ${{ needs.qa-testing.result }} |"
+            echo "| path | ${{ needs.build.outputs.hotfix == 'true' && 'hotfix' || 'full' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

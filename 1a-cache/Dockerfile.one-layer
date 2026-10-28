@@ -1,7 +1,0 @@
-# The same packages and the same cleanup, in one instruction.
-# The mess is created and removed inside a single filesystem diff,
-# so the removed bytes never enter the image at all.
-FROM python:3.12-slim
-RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential \
- && rm -rf /var/lib/apt/lists/* /var/cache/apt

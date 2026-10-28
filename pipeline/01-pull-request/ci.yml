@@ -1,0 +1,40 @@
+# 01 — we found out after merging
+#
+# The branch looked fine. Main was red all weekend.
+# CI lives on the pull request: do the tests pass, and does it still build?
+name: ci
+
+on: pull_request          # any pull request, against any branch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ci-base-app/requirements*.txt
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+        working-directory: ci-base-app
+
+      - run: python -m pytest tests -q
+        working-directory: ci-base-app
+
+  build:
+    needs: test           # a broken commit is not worth a docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+
+      - name: the image starts, and the app inside it imports
+        run: |
+          docker run --rm -d --name shop -p 8080:8080 catshop:${{ github.sha }}
+          for i in $(seq 1 20); do curl -fsS localhost:8080/health && break; sleep 1; done
+          curl -fsS localhost:8080/health
+          docker rm -f shop

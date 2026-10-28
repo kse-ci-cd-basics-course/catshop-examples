@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Runbook</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; }
+    code { background: #f4f1fb; padding: .1rem .3rem; border-radius: .2rem; }
+    dt { font-weight: 600; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>When the pipeline is red</h1>
+  <dl>
+    <dt><code>403</code> pushing to ghcr.io</dt>
+    <dd>The job is missing <code>permissions: packages: write</code>.</dd>
+
+    <dt><code>toomanyrequests</code> pulling a base image</dt>
+    <dd>Docker Hub's anonymous rate limit. Log in, even for a pull.</dd>
+
+    <dt>The cache never hits</dt>
+    <dd>Look for <code>Cache restored from key:</code> in the log. No line means no cache —
+        usually a key with no <code>hashFiles()</code> in it.</dd>
+
+    <dt>A job says <em>skipped</em> and the check still passed</dt>
+    <dd>Working as designed. A required check counts a skipped job as passed.</dd>
+  </dl>
+  <p><a href="./">back</a></p>
+</body>
+</html>

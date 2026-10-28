@@ -1,8 +1,0 @@
-# Plain `pip install`: no --no-cache-dir, no cache mount.
-# pip downloads wheels, installs them, and leaves ~/.cache/pip sitting inside
-# the layer. The cache ships to every machine that pulls this image and is
-# never read again. Measured against ./Dockerfile in ACT 7 of cache.sh.
-FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt

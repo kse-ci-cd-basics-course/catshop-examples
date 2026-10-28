@@ -1,0 +1,42 @@
+# Two units of reuse, side by side. The only file where both are visible at once.
+#
+#   composite action    made of STEPS.  steps: - uses: ./.github/actions/x
+#                       runs in your job, on your disk, after your checkout
+#   reusable workflow   made of JOBS.   jobs: <id>: uses: ./.github/workflows/x.yml
+#                       its own runners, its own checkout, shares nothing
+#
+# Rule of thumb: repeating steps inside a job → action. Repeating whole jobs
+# across repositories → workflow.
+name: 15 · using both
+
+on: workflow_dispatch
+
+jobs:
+  # the composite action, used the way you use anybody else's action
+  with-an-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4          # the action needs the code to be here
+
+      - id: suite
+        uses: ./.github/actions/install-and-test
+        with:
+          python-version: '3.12'
+
+      - run: echo "it reported ${{ steps.suite.outputs.tests }}"
+
+  # the reusable workflow. No `steps:`, no `runs-on:` — this job IS the call.
+  with-a-workflow:
+    uses: ./.github/workflows/_build-and-test.yml
+    with:
+      image: ghcr.io/example/catshop
+      tag: demo
+      publish: false
+    secrets: inherit
+
+  # and it hands values back, the same way a job does
+  after:
+    needs: with-a-workflow
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "built ${{ needs.with-a-workflow.outputs.digest }}"

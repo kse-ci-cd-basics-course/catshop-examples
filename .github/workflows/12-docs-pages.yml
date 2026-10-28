@@ -1,0 +1,64 @@
+# A typo in the runbook should not build a docker image.
+# This file and ci.yml are a pair: one push matches exactly one of them.
+#
+# Also the honest `permissions:` example. Pages needs two nobody else does,
+# and `id-token: write` is OIDC — the deploy holds no key.
+name: 12 · docs
+
+on:
+  # the path filter, doing something somebody actually wanted
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/12-docs-pages.yml'
+
+  # and the button, because a docs republish is the thing people ask for by hand
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: why are you republishing?
+        type: string
+        required: false
+        default: content fix
+
+permissions:
+  contents: read
+  pages: write           # create a Pages deployment
+  id-token: write        # prove this run is this run — no stored credential
+
+# one deployment at a time, and DO NOT cancel a running one: a half-finished
+# deploy leaves the site serving a mix of two versions
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: say why, when a human pressed the button
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "republished by ${{ github.actor }} — ${{ inputs.reason }}"
+
+      # a real site would run a generator here. The lesson is the trigger and
+      # the permissions, so this uploads the folder as it stands.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # the deployment shows up on the repository's Environments page, with the
+    # URL attached to it — this is `environment:` being useful, not ceremony
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      - run: echo "published to ${{ steps.deploy.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"

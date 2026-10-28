@@ -1,0 +1,82 @@
+# 03 — three copies, already drifting
+#
+# The same four steps in three files. One is still on 3.9, and that is the
+# one that stayed green.
+#
+# NEW: uses: at a tag · pinning · your own composite action · artifacts
+name: ci
+
+on:
+  # unchanged from chapter 01: every pull request still gets tested.
+  # the default is opened + synchronize + reopened, so write `types:` only when
+  # you want something else — `ready_for_review` to skip drafts, `closed` to
+  # tear down a preview, `labeled` to run on demand
+  pull_request:
+
+  # a typo in docs/ matches nothing here. It lands in 12-docs-pages.yml
+  push:
+    branches: [main]
+    paths:
+      - 'ci-base-app/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/_build-and-test.yml'
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: where to pretend to deploy
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+      dry_run:
+        description: say what would happen, do nothing
+        type: boolean
+        default: true
+
+  # cron is UTC. No timezone field — which is why things run an hour early in spring
+  schedule:
+    - cron: '17 3 * * 1'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: which subscription delivered this run
+        run: |
+          echo "event   ${{ github.event_name }}"
+          echo "ref     ${{ github.ref_name }}"
+          echo "action  ${{ github.event.action }}"
+
+      - uses: actions/checkout@v4
+
+      # four steps became one, read from the commit being tested
+      - id: suite
+        uses: ./.github/actions/install-and-test
+        with:
+          python-version: '3.12'
+
+      - run: echo "the action reported ${{ steps.suite.outputs.tests }}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()              # even when the suite above went red
+        with:
+          name: pytest-output
+          path: ci-base-app/out.txt
+          retention-days: 3
+
+  build:
+    needs: test           # a broken commit is not worth a docker build
+    runs-on: ubuntu-latest
+    steps:
+      # v4 is a branch the publisher moves. Pin a sha when that matters:
+      #   gh api repos/actions/checkout/git/ref/tags/v4 --jq .object.sha
+      - uses: actions/checkout@v4
+
+      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+
+      - name: the image starts, and the app inside it imports
+        run: |
+          docker run --rm -d --name shop -p 8080:8080 catshop:${{ github.sha }}
+          for i in $(seq 1 20); do curl -fsS localhost:8080/health && break; sleep 1; done
+          curl -fsS localhost:8080/health
+          docker rm -f shop

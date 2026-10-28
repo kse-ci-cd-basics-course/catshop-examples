@@ -1,5 +1,6 @@
 .env
 __pycache__/
+.pytest_cache/
 *.pyc
 .venv/
 data/
@@ -8,3 +9,6 @@ data/
 
 # transient, created and removed by 1a-cache/cache.sh — only lingers if a run is killed
 gotcha.txt
+
+# written by the composite action's test step
+ci-base-app/out.txt
