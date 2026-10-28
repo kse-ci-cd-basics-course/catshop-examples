@@ -87,6 +87,7 @@ jobs:
         with:
           environment: sandbox
           host: ${{ vars.APP_HOST }}
+          dry-run: ${{ vars.DRY_RUN || 'true' }}
 
   stage:
     needs: sandbox            # red qa in sandbox, and this never starts
@@ -104,6 +105,7 @@ jobs:
         with:
           environment: stage
           host: ${{ vars.APP_HOST }}
+          dry-run: ${{ vars.DRY_RUN || 'true' }}
 
   production:
     needs: stage
@@ -121,3 +123,4 @@ jobs:
         with:
           environment: production
           host: ${{ vars.APP_HOST }}
+          dry-run: ${{ vars.DRY_RUN || 'true' }}

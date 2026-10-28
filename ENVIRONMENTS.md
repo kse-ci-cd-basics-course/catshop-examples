@@ -4,6 +4,13 @@
 are identical for all three. **Settings → Environments → New environment**: `sandbox`, `stage`,
 `production`.
 
+These are **environment** variables, not repository ones. The same name exists three times with
+three values, and `vars.APP_HOST` resolves to whichever environment the job claimed. A
+repository variable would be one value for all three, which is the thing we are avoiding.
+
+Lookup order is **environment → repository → organisation**, nearest wins. A job with no
+`environment:` key sees only the repository and organisation ones.
+
 ## Variables
 
 | Name | sandbox | stage | production |
@@ -13,6 +20,15 @@ are identical for all three. **Settings → Environments → New environment**: 
 | `LOG_LEVEL` | `debug` | `info` | `warn` |
 | `FEATURE_NEW_CHECKOUT` | `on` | `on` | `off` |
 | `VAULT_ROLE` | `catshop-sandbox` | `catshop-stage` | `catshop-prod` |
+| `DRY_RUN` | `true` until something is really deployed there | `true` | `true` |
+
+**`DRY_RUN`** is the one that is not permanent. While no host exists, the qa action prints the
+pack it would have run instead of curling a URL that is not there. Set it to `false` per
+environment as each one becomes real.
+
+A missing variable is an **empty string, not an error** — so `vars.APP_HOST` unset would turn
+`curl "$HOST/health"` into `curl "/health"` and fail for a reason that reads like a bug. The qa
+action checks for it and says so instead.
 
 ## Secrets
 

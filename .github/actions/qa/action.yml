@@ -13,12 +13,28 @@ inputs:
   host:
     description: the base URL to test
     required: true
+  dry-run:
+    description: print the pack instead of running it, while there is no real host
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
+    # vars.APP_HOST missing resolves to an EMPTY STRING, not an error — the
+    # curls below would become `curl /health` and fail for the wrong reason.
+    # Say it here instead, where the message is readable.
+    - name: the host has to exist
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.host }}" ]; then
+          echo "::error::APP_HOST is not set on the '${{ inputs.environment }}' environment"
+          exit 1
+        fi
+
     # everywhere: is it up, and is it the build we just deployed
     - name: smoke
+      if: inputs.dry-run != 'true'
       shell: bash
       run: |
         curl -fsS --max-time 10 "${{ inputs.host }}/health"
@@ -26,7 +42,7 @@ runs:
 
     # not in production: this one writes
     - name: contract
-      if: inputs.environment != 'production'
+      if: inputs.dry-run != 'true' && inputs.environment != 'production'
       shell: bash
       run: |
         curl -fsS --max-time 10 "${{ inputs.host }}/visits"
@@ -34,7 +50,7 @@ runs:
 
     # stage is the one that talks to the real partner
     - name: end-to-end
-      if: inputs.environment == 'stage'
+      if: inputs.dry-run != 'true' && inputs.environment == 'stage'
       shell: bash
       run: |
         echo "full pack against ${{ inputs.host }}"
@@ -43,11 +59,16 @@ runs:
 
     # production is tested read-only. No test writes to production.
     - name: production checks
-      if: inputs.environment == 'production'
+      if: inputs.dry-run != 'true' && inputs.environment == 'production'
       shell: bash
       run: |
         curl -fsS --max-time 10 "${{ inputs.host }}/price/MK-II" > /dev/null
         echo "read-only. If this needed a write, it would not belong here"
+
+    - name: nothing is deployed yet, so say what would have run
+      if: inputs.dry-run == 'true'
+      shell: bash
+      run: echo "::notice::qa ${{ inputs.environment }} skipped — dry-run, host ${{ inputs.host }}"
 
     - shell: bash
       run: echo "qa ${{ inputs.environment }} — ok" >> "$GITHUB_STEP_SUMMARY"
