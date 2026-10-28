@@ -1,7 +1,7 @@
 # The delivery pipeline. One file, two shapes, decided by what triggered it.
 #
-#   on main   build ─> sandbox ─> stage ─> production
-#   on a PR   build ─> sandbox ─> stage              production is main only
+#   on main   build ─> image ─> sandbox ─> stage ─> production
+#   on a PR   build ─> image ─> sandbox ─> stage           production is main only
 #
 # Each deploy job ends with its OWN qa run, in the same job — if the checks
 # fail, the deploy job is red, and the next environment never starts. The gate
@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  packages: write        # the image job pushes to ghcr.io
 
 jobs:
   build:
@@ -31,38 +32,70 @@ jobs:
       - id: pick
         run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/install-and-test        # unit tests
-      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+
+  # the registry job: the only place the image is built, and the only place it
+  # is pushed. Everything below deploys what came out of here, by digest.
+  image:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.image }}@${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - id: pick
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}       # nobody created this one
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          push: true
+          tags: |
+            ${{ steps.pick.outputs.image }}:${{ needs.build.outputs.tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   sandbox:
-    needs: build
+    needs: [build, image]
     runs-on: ubuntu-latest
     environment:
       name: sandbox
       url: ${{ vars.APP_HOST }}
     steps:
       - uses: actions/checkout@v4                      # the qa action needs the repo
-      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
+      # a tag can be moved. The digest is the bytes the image job produced.
+      - run: echo "deploying ${{ needs.image.outputs.ref }} to ${{ vars.APP_HOST }}"
       - uses: ./.github/actions/qa
         with:
           environment: sandbox
           host: ${{ vars.APP_HOST }}
 
   stage:
-    needs: sandbox            # red qa in sandbox, and this never starts
+    needs: [image, sandbox]   # red qa in sandbox, and this never starts
     runs-on: ubuntu-latest
     environment:
       name: stage
       url: ${{ vars.APP_HOST }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
+      # a tag can be moved. The digest is the bytes the image job produced.
+      - run: echo "deploying ${{ needs.image.outputs.ref }} to ${{ vars.APP_HOST }}"
       - uses: ./.github/actions/qa
         with:
           environment: stage
           host: ${{ vars.APP_HOST }}
 
   production:
-    needs: [build, stage]
+    needs: [image, stage]
     if: github.ref == 'refs/heads/main'      # a pull request stops at stage
     runs-on: ubuntu-latest
     # the required reviewer lives on the environment, not here
@@ -71,7 +104,8 @@ jobs:
       url: ${{ vars.APP_HOST }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "deploying ${{ needs.build.outputs.tag }} to ${{ vars.APP_HOST }}"
+      # a tag can be moved. The digest is the bytes the image job produced.
+      - run: echo "deploying ${{ needs.image.outputs.ref }} to ${{ vars.APP_HOST }}"
       - uses: ./.github/actions/qa
         with:
           environment: production

@@ -41,7 +41,7 @@ GitHub reads**:
 | `08-on-main.yml` | the other half of chapter 01. A merge is not an event — it arrives as a push, in a different file, on a different commit, and only this one may deploy |
 | `09-from-outside.yml` | the cron that hopes, replaced — `repository_dispatch` and a run with no commit behind it |
 | `10-message-routes.yml` | 02:00, production down. `build → qa-testing → deploy`, and `[hotfix]` **skips the twenty-minute qa stage** and deploys. The `if:` on `deploy` is the lesson: `needs` hides an `&& success()`, so a skipped stage has to be allowed on purpose |
-| `14-environments.yml` | **the delivery pipeline.** `build → sandbox → stage → production` on main; a pull request stops at stage. Each deploy job runs its own qa through one shared action. `ENVIRONMENTS.md` has the setup |
+| `14-environments.yml` | **the delivery pipeline.** `build → image → sandbox → stage → production` on main; a pull request stops at stage. Each deploy job runs its own qa through one shared action. `ENVIRONMENTS.md` has the setup |
 | `11-anchors.yml` | `&` defines, `*` repeats — and the wrong fix for chapter 03, because an anchor never leaves its file |
 | `15-reuse.yml` | **both units of reuse in one screen** — a composite action used as a step, a reusable workflow used as a job |
 | `13-artifacts.yml` | **what a run leaves behind** — a JUnit report, an HTML coverage report, and the image itself as a tarball, handed to a later job without publishing anything |
@@ -50,9 +50,13 @@ GitHub reads**:
 ### The delivery pipeline
 
 ```
-on main    build ─> sandbox ─> stage ─> production
-on a PR    build ─> sandbox ─> stage            production is main only
+on main    build ─> image ─> sandbox ─> stage ─> production
+on a PR    build ─> image ─> sandbox ─> stage            production is main only
 ```
+
+`image` is the only job that builds and the only one that pushes. It publishes to GHCR and
+exports `ghcr.io/<repo>@sha256:…`, so **every environment deploys the same bytes** — a tag can
+be moved between sandbox and production, a digest cannot.
 
 **The qa run lives inside its deploy job**, not beside it: deploy, then check, in one job. A
 failed check makes that job red, and the next environment never starts — the gate is the plain
