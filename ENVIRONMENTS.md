@@ -20,11 +20,10 @@ Lookup order is **environment → repository → organisation**, nearest wins. A
 | `LOG_LEVEL` | `debug` | `info` | `warn` |
 | `FEATURE_NEW_CHECKOUT` | `on` | `on` | `off` |
 | `VAULT_ROLE` | `catshop-sandbox` | `catshop-stage` | `catshop-prod` |
-| `DRY_RUN` | `true` until something is really deployed there | `true` | `true` |
 
-**`DRY_RUN`** is the one that is not permanent. While no host exists, the qa action prints the
-pack it would have run instead of curling a URL that is not there. Set it to `false` per
-environment as each one becomes real.
+**Nothing is really deployed.** The deploy step prints `deployed <digest> on <APP_HOST>` and the
+qa action prints the checks it would run. `APP_HOST` is still worth setting properly, because it
+is what makes one expression resolve to three different values.
 
 A missing variable is an **empty string, not an error** — so `vars.APP_HOST` unset would turn
 `curl "$HOST/health"` into `curl "/health"` and fail for a reason that reads like a bug. The qa

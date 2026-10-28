@@ -1,8 +1,8 @@
 # One QA pack, three environments. The environment decides what runs.
 #
-# Written as a composite action and not as three jobs, because the steps are
-# the same shape everywhere and only the depth changes. A step-level `if:` on
-# an input is all it takes.
+# Nothing is really deployed yet, so each step says what it would check. The
+# shape is the lesson: one shared action, a step-level `if:` on an input, and
+# no copy of it per environment.
 name: qa
 description: Run the checks that suit this environment
 
@@ -11,20 +11,15 @@ inputs:
     description: sandbox · stage · production
     required: true
   host:
-    description: the base URL to test
+    description: the base URL this environment runs at
     required: true
-  dry-run:
-    description: print the pack instead of running it, while there is no real host
-    required: false
-    default: 'false'
 
 runs:
   using: composite
   steps:
-    # vars.APP_HOST missing resolves to an EMPTY STRING, not an error — the
-    # curls below would become `curl /health` and fail for the wrong reason.
-    # Say it here instead, where the message is readable.
-    - name: the host has to exist
+    # a missing variable is an EMPTY STRING, not an error — so say it here,
+    # where the message is readable
+    - name: the host has to be set
       shell: bash
       run: |
         if [ -z "${{ inputs.host }}" ]; then
@@ -32,43 +27,24 @@ runs:
           exit 1
         fi
 
-    # everywhere: is it up, and is it the build we just deployed
     - name: smoke
-      if: inputs.dry-run != 'true'
       shell: bash
-      run: |
-        curl -fsS --max-time 10 "${{ inputs.host }}/health"
-        curl -fsS --max-time 10 "${{ inputs.host }}/ready"
+      run: echo "GET ${{ inputs.host }}/health  ·  /ready"
 
-    # not in production: this one writes
     - name: contract
-      if: inputs.dry-run != 'true' && inputs.environment != 'production'
+      if: inputs.environment != 'production'
       shell: bash
-      run: |
-        curl -fsS --max-time 10 "${{ inputs.host }}/visits"
-        echo "state moves, and the partner contract holds"
+      run: echo "POST ${{ inputs.host }}/visits — this one writes, so not in production"
 
-    # stage is the one that talks to the real partner
     - name: end-to-end
-      if: inputs.dry-run != 'true' && inputs.environment == 'stage'
+      if: inputs.environment == 'stage'
       shell: bash
-      run: |
-        echo "full pack against ${{ inputs.host }}"
-        sleep 5
-        echo "42 scenarios, 0 failed"
+      run: echo "42 scenarios against ${{ inputs.host }}, with the real partner"
 
-    # production is tested read-only. No test writes to production.
     - name: production checks
-      if: inputs.dry-run != 'true' && inputs.environment == 'production'
+      if: inputs.environment == 'production'
       shell: bash
-      run: |
-        curl -fsS --max-time 10 "${{ inputs.host }}/price/MK-II" > /dev/null
-        echo "read-only. If this needed a write, it would not belong here"
-
-    - name: nothing is deployed yet, so say what would have run
-      if: inputs.dry-run == 'true'
-      shell: bash
-      run: echo "::notice::qa ${{ inputs.environment }} skipped — dry-run, host ${{ inputs.host }}"
+      run: echo "GET ${{ inputs.host }}/price/MK-II — read-only. Nothing writes to production"
 
     - shell: bash
       run: echo "qa ${{ inputs.environment }} — ok" >> "$GITHUB_STEP_SUMMARY"
