@@ -17,34 +17,37 @@ inputs:
 runs:
   using: composite
   steps:
-    # a missing variable is an EMPTY STRING, not an error — so say it here,
-    # where the message is readable
-    - name: the host has to be set
+    # a missing variable is an EMPTY STRING, not an error. Say so, and carry on
+    # with a placeholder — nothing is really deployed yet.
+    - name: where this environment lives
+      id: where
       shell: bash
       run: |
-        if [ -z "${{ inputs.host }}" ]; then
-          echo "::error::APP_HOST is not set on the '${{ inputs.environment }}' environment"
-          exit 1
+        host="${{ inputs.host }}"
+        if [ -z "$host" ]; then
+          host="https://${{ inputs.environment }}.catshop.example"
+          echo "::notice::APP_HOST is not set on '${{ inputs.environment }}' — using $host"
         fi
+        echo "host=$host" >> "$GITHUB_OUTPUT"
 
     - name: smoke
       shell: bash
-      run: echo "GET ${{ inputs.host }}/health  ·  /ready"
+      run: echo "GET ${{ steps.where.outputs.host }}/health  ·  /ready"
 
     - name: contract
       if: inputs.environment != 'production'
       shell: bash
-      run: echo "POST ${{ inputs.host }}/visits — this one writes, so not in production"
+      run: echo "POST ${{ steps.where.outputs.host }}/visits — this one writes, so not in production"
 
     - name: end-to-end
       if: inputs.environment == 'stage'
       shell: bash
-      run: echo "42 scenarios against ${{ inputs.host }}, with the real partner"
+      run: echo "42 scenarios against ${{ steps.where.outputs.host }}, with the real partner"
 
     - name: production checks
       if: inputs.environment == 'production'
       shell: bash
-      run: echo "GET ${{ inputs.host }}/price/MK-II — read-only. Nothing writes to production"
+      run: echo "GET ${{ steps.where.outputs.host }}/price/MK-II — read-only. Nothing writes to production"
 
     - shell: bash
       run: echo "qa ${{ inputs.environment }} — ok" >> "$GITHUB_STEP_SUMMARY"

@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4                      # the qa action needs the repo
       # a tag can be moved. The digest is the bytes the image job produced.
-      - run: echo "deployed ${{ needs.image.outputs.ref }} on ${{ vars.APP_HOST }}"
+      - run: echo "deployed ${{ needs.image.outputs.ref }} on ${{ vars.APP_HOST || 'sandbox' }}"
       - uses: ./.github/actions/qa
         with:
           environment: sandbox
@@ -99,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # a tag can be moved. The digest is the bytes the image job produced.
-      - run: echo "deployed ${{ needs.sandbox.outputs.ref }} on ${{ vars.APP_HOST }}"
+      - run: echo "deployed ${{ needs.sandbox.outputs.ref }} on ${{ vars.APP_HOST || 'stage' }}"
       - uses: ./.github/actions/qa
         with:
           environment: stage
@@ -116,7 +116,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # a tag can be moved. The digest is the bytes the image job produced.
-      - run: echo "deployed ${{ needs.stage.outputs.ref }} on ${{ vars.APP_HOST }}"
+      - run: echo "deployed ${{ needs.stage.outputs.ref }} on ${{ vars.APP_HOST || 'production' }}"
       - uses: ./.github/actions/qa
         with:
           environment: production
