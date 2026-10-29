@@ -1,0 +1,53 @@
+# One QA pack, three environments. The environment decides what runs.
+#
+# Nothing is really deployed yet, so each step says what it would check. The
+# shape is the lesson: one shared action, a step-level `if:` on an input, and
+# no copy of it per environment.
+name: qa
+description: Run the checks that suit this environment
+
+inputs:
+  environment:
+    description: sandbox · stage · production
+    required: true
+  host:
+    description: the base URL this environment runs at
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # a missing variable is an EMPTY STRING, not an error. Say so, and carry on
+    # with a placeholder — nothing is really deployed yet.
+    - name: where this environment lives
+      id: where
+      shell: bash
+      run: |
+        host="${{ inputs.host }}"
+        if [ -z "$host" ]; then
+          host="https://${{ inputs.environment }}.catshop.example"
+          echo "::notice::APP_HOST is not set on '${{ inputs.environment }}' — using $host"
+        fi
+        echo "host=$host" >> "$GITHUB_OUTPUT"
+
+    - name: smoke
+      shell: bash
+      run: echo "GET ${{ steps.where.outputs.host }}/health  ·  /ready"
+
+    - name: contract
+      if: inputs.environment != 'production'
+      shell: bash
+      run: echo "POST ${{ steps.where.outputs.host }}/visits — this one writes, so not in production"
+
+    - name: end-to-end
+      if: inputs.environment == 'stage'
+      shell: bash
+      run: echo "42 scenarios against ${{ steps.where.outputs.host }}, with the real partner"
+
+    - name: production checks
+      if: inputs.environment == 'production'
+      shell: bash
+      run: echo "GET ${{ steps.where.outputs.host }}/price/MK-II — read-only. Nothing writes to production"
+
+    - shell: bash
+      run: echo "qa ${{ inputs.environment }} — ok" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,205 @@
+# 07 — the same two jobs, in four repositories
+#
+# The composite action cannot help: it is made of steps, so it runs inside one
+# job and cannot fan out. The thing made of jobs is a reusable workflow.
+#
+#   composite action  → steps: - uses: ./.github/actions/x
+#   reusable workflow → jobs: verify: uses: ./.github/workflows/x.yml
+#
+# NEW: workflow_call · jobs.<id>.uses · typed inputs · secrets: inherit
+name: ci
+
+on:
+  # unchanged from chapter 01: every pull request still gets tested.
+  # the default is opened + synchronize + reopened, so write `types:` only when
+  # you want something else — `ready_for_review` to skip drafts, `closed` to
+  # tear down a preview, `labeled` to run on demand
+  pull_request:
+
+  # a typo in docs/ matches nothing here. It lands in 12-docs-pages.yml
+  push:
+    branches: [main]
+    paths:
+      - 'ci-base-app/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/_build-and-test.yml'
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: where to pretend to deploy
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+      dry_run:
+        description: say what would happen, do nothing
+        type: boolean
+        default: true
+
+  # cron is UTC. No timezone field — which is why things run an hour early in spring
+  schedule:
+    - cron: '17 3 * * 1'
+
+# start from nothing. `packages: write` is what lets the image job push
+env:
+  APP: catshop              # every job in this file
+
+permissions:
+  contents: read
+  packages: write
+
+# push twice and the first run is cancelled, instead of two racing to publish
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # a debugger, not a stage. Delete it once you have found the thing.
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: two syntaxes, two readers
+        env:
+          FROM_GITHUB: ${{ github.sha }}      # substituted before bash exists
+        run: |
+          echo "github substituted this: ${{ github.sha }}"
+          echo "bash expanded this:      $FROM_GITHUB"
+          echo 'bash never sees the double-brace form; github already removed it'
+
+      - name: everything this run knows
+        run: echo '${{ toJSON(github.event) }}' | head -40
+
+      - name: a key that does not exist is EMPTY, not an error
+        run: |
+          echo "vars.NOPE is [${{ vars.NOPE }}]"
+          echo "this is where a deploy to '' comes from"
+
+  # decide the tag once, so every job agrees on it
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      image: ${{ steps.pick.outputs.image }}
+      publish: ${{ steps.pick.outputs.publish }}
+    steps:
+      - id: pick
+        run: |
+          echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          # GHCR rejects an uppercase path, and an owner may have capitals
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF" = refs/heads/main ]; then
+            echo "publish=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+          fi
+          # a step has no API. It appends to a file the runner reads between steps
+          echo "BUILT_BY=$GITHUB_ACTOR"  >> "$GITHUB_ENV"           # every later step
+          echo "$HOME/.local/bin"        >> "$GITHUB_PATH"          # on PATH from now on
+          echo "### ${GITHUB_SHA::7}"    >> "$GITHUB_STEP_SUMMARY"  # the run's summary page
+
+      - name: the next step reads them back
+        run: |
+          echo "output  ${{ steps.pick.outputs.tag }}"
+          echo "env     $BUILT_BY"
+          cat "$GITHUB_OUTPUT" "$GITHUB_ENV"
+
+  # one call, still two jobs on two runners. Look at the run graph.
+  verify:
+    needs: meta
+    uses: ./.github/workflows/_build-and-test.yml
+    with:
+      image: ${{ needs.meta.outputs.image }}
+      tag: ${{ needs.meta.outputs.tag }}
+      publish: ${{ needs.meta.outputs.publish == 'yes' }}
+    # a called workflow sees no secrets unless you say so
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+
+  smoke:
+    needs: verify
+    outputs:
+      ref: ${{ needs.verify.outputs.ref }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: run what we just published, BY DIGEST
+        run: |
+          # a tag can be moved. A digest is the bytes.
+          ref='${{ needs.verify.outputs.ref }}'
+          docker run -d --name shop -p 8080:8080 "$ref"
+          for i in $(seq 1 20); do curl -fsS localhost:8080/health && break; sleep 1; done
+          curl -fsS localhost:8080/health
+
+      - if: failure()
+        run: docker logs shop
+
+  report:
+    # `needs` is wait-for. `always()` turns off the hidden "and all green".
+    # the one legitimate fan-in: a report reads what everything else did
+    needs: [verify, smoke, deploy-production]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          {
+            echo "| job | result |"
+            echo "|---|---|"
+            echo "| verify | ${{ needs.verify.result }} |"
+            echo "| smoke | ${{ needs.smoke.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: only on the default branch
+        if: github.ref == 'refs/heads/main'
+        run: echo "published ${{ needs.verify.outputs.tag }}"
+
+      - name: only when something above went red
+        if: contains(needs.*.result, 'failure')
+        run: echo "somebody has to be told"
+
+      - name: a step with no condition at all is success() by default
+        run: echo "which is why upload-artifact needs always() to survive a red build"
+
+  deploy-qa:
+    needs: smoke
+    outputs:
+      ref: ${{ needs.smoke.outputs.ref }}
+    runs-on: ubuntu-latest
+    environment: qa          # decides which vars and secrets exist here
+    env:
+      APP: catshop-worker    # every step in this job
+    steps:
+      - run: echo "$APP"     # catshop-worker
+
+      - run: echo "$APP"     # catshop-probe — the step is nearer, so it wins
+        env:
+          APP: catshop-probe
+
+      - name: same key names, qa's values
+        run: |
+          echo "host      ${{ vars.APP_HOST }}"
+          echo "replicas  ${{ vars.REPLICAS }}"
+          echo "image     ${{ needs.smoke.outputs.ref }}"
+          # an address, not a password. The app reads the vault at startup.
+          echo "vault     ${{ vars.VAULT_ROLE }}"
+          echo "token len ${#TOKEN}"
+        env:
+          TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+
+  deploy-production:
+    needs: deploy-qa
+    runs-on: ubuntu-latest
+    environment: production  # same key names, different values, and a reviewer
+    steps:
+      - name: masking is a safety net, not a plan
+        run: |
+          echo "::add-mask::$(echo hunter2)"
+          echo "host      ${{ vars.APP_HOST }}"
+          echo "deploying ${{ needs.deploy-qa.outputs.ref }}"

@@ -1,0 +1,41 @@
+# Your own steps, behind one `uses:`. Runs in the caller's job, on their disk.
+# Made of steps — the thing made of jobs is _build-and-test.yml.
+name: install and test
+description: Install the app's dependencies and run pytest
+
+inputs:
+  python-version:
+    description: which Python to install
+    required: false
+    default: '3.12'
+  working-directory:
+    description: the folder holding requirements.txt and tests/
+    required: false
+    default: ci-base-app
+
+outputs:
+  tests:
+    description: how many tests ran
+    value: ${{ steps.run.outputs.tests }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+        cache-dependency-path: ${{ inputs.working-directory }}/requirements*.txt
+
+    - name: install
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: pip install -r requirements.txt -r requirements-dev.txt
+
+    - id: run
+      name: test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        python -m pytest tests -q | tee out.txt
+        echo "tests=$(grep -oE '[0-9]+ passed' out.txt | head -1)" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,81 @@
+# A reusable workflow: made of JOBS, called with `jobs.<id>.uses`.
+# Its own runners, its own checkout. It shares nothing with the caller.
+#
+# The underscore says nothing triggers it — somebody calls it.
+name: _ build and test
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: the full image name, without a tag
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      publish:
+        description: push the image, or only build it
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      digest:
+        description: the image we built, by digest
+        value: ${{ jobs.image.outputs.digest }}
+      ref:
+        description: image@digest — echoed back so the caller can chain on this job alone
+        value: ${{ inputs.image }}@${{ jobs.image.outputs.digest }}
+      tag:
+        description: the tag it was given, echoed back for the same reason
+        value: ${{ inputs.tag }}
+    # a called workflow gets no secrets unless they are named here, or the
+    # caller says `secrets: inherit`
+    secrets:
+      registry-token:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # two jobs, two runners, running at the same time — this is what a composite
+  # action cannot do
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4          # it has to check out: not the caller's disk
+      - uses: ./.github/actions/install-and-test
+        with:
+          python-version: ${{ matrix.python }}
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - if: inputs.publish
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.registry-token || secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          push: ${{ inputs.publish }}
+          tags: ${{ inputs.image }}:${{ inputs.tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

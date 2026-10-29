@@ -1,7 +1,0 @@
-# "I cleaned up afterwards." Measured against Dockerfile.one-layer.
-# Three RUN instructions: the index is downloaded in one layer, the cleanup
-# happens in a third. A layer can only add a diff, never shrink the one below.
-FROM python:3.12-slim
-RUN apt-get update
-RUN apt-get install -y --no-install-recommends build-essential
-RUN rm -rf /var/lib/apt/lists/* /var/cache/apt

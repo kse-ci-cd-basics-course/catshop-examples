@@ -1,0 +1,26 @@
+# Nobody pushed anything. Something outside said go.
+#
+#   curl -X POST -H "Authorization: Bearer $GH_TOKEN" \
+#     https://api.github.com/repos/OWNER/REPO/dispatches \
+#     -d '{"event_type":"dataset-published","client_payload":{"rows":128400}}'
+#
+# Must already be on the default branch, or nothing happens.
+# New data starting a run is continuous training, not CI.
+name: 09 · an event from outside
+
+on:
+  repository_dispatch:
+    types: [dataset-published]
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: nobody committed anything
+        run: |
+          echo "type     ${{ github.event.action }}"
+          echo "dataset  ${{ github.event.client_payload.dataset }}"
+          echo "rows     ${{ github.event.client_payload.rows }}"
+
+      - name: and the payload is yours, not GitHub's
+        run: echo '${{ toJSON(github.event.client_payload) }}'

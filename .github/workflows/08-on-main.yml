@@ -1,0 +1,19 @@
+# A merge is not an event. It arrives as a push to main.
+# Different file, different commit, and the only one allowed to deploy.
+# Chapter 01 is the other half. Compare the two `sha` lines.
+name: 08 · on a push to main
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "event  ${{ github.event_name }}"
+          echo "sha    ${{ github.sha }}"        # now a commit that is really on main
+      - run: echo "pretending to deploy ${{ github.sha }}"

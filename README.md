@@ -1,134 +1,128 @@
-# catshop — the reference examples
+# Catshop Examples
 
-Seven directories. Each one **runs on its own**, and each differs from the previous by exactly the
-thing it teaches. Read them in order, `diff` them against each other, run them.
+This repository contains reference material for learning CI/CD with Docker and GitHub Actions.
 
-This repo is **reference material you read**. Your graded work goes in your own lab repository.
+## Base Application
+Located in `ci-base-app/`, it is a small Flask application with three endpoints (`/health`, `/visits`, `/price`).
 
-## The application
+## Docker Examples
+Located in `docker/`, each example builds on the base application to demonstrate different features:
 
-One small Flask app, **byte-identical in all seven directories** (`md5 */app.py` to prove it). Three
-endpoints, deliberately chosen to depend on three different kinds of thing:
+- `01-dockerfile`: Demonstrates base, multi-stage, and optimized Dockerfiles.
+- `02-compose-postgres`: Basic database integration (ephemeral).
+- `03-compose-volumes`: Database with persistent storage.
+- `04-compose-wiremock`: Integrating a third-party partner service.
+- `05-compose-networks`: Isolated internal networks.
 
-| Endpoint | Depends on | Appears in |
-|---|---|---|
-| `GET /health` | nothing | step 1 |
-| `GET /visits` | our own state — a file, then a database | step 1, then step 2 |
-| `GET /price/<sku>` | an API we do not own | step 4 |
+## GitHub Actions
 
-The app never learns about volumes, networks or stubs. **Its composition does.** That is the whole
-argument of this repo.
+One team's pipeline over one term. `pipeline/` holds the chapters — the same `ci.yml`,
+seven times, one new segment each, and every chapter exists because the one before it
+hurt. `pipeline/README.md` has the table, the diff commands, and the composite-action
+versus reusable-workflow comparison.
 
-## The seven steps
-
-| Step | Directory | Adds | The moment |
-|---|---|---|---|
-| 1 | `1-dockerfile/` | `Dockerfile`, `.dockerignore` | ten instructions, each with a consequence. `EXPOSE` publishes nothing |
-| 1a | `1a-cache/` | a cache mount, five variants to measure, `cache.sh` | one **unused** file in the folder, and every dependency reinstalls. **6 s → 0 s** on the same edit |
-| 1b | `1b-dockerfile-multistage/` | a second `FROM` | **684 MB → 253 MB.** The single-stage image ships a C compiler to production |
-| 2 | `2-compose-postgres-no-volume/` | `compose.yaml`, `init-db/` | a real database — and `down`/`up` **still loses every row** |
-| 3 | `3-compose-postgres-volume/` | a named volume | three lines of YAML, and the data survives |
-| 4 | `4-compose-wiremock-partner/` | a `partner` service + stubs | a 500 and a 5-second delay, on demand |
-| 5 | `5-compose-networks-internal/` | `networks:` on every service | the database and the stub can reach **nothing** |
-
-Each directory has its own `README.md` with the commands, the expected output, and why.
-
-## Running a step
-
-**Steps 1 and 1a are a single image — no Compose:**
-
-```bash
-cd 1-dockerfile
-docker build -t catshop:step1 .
-docker run -d --name step1 -p 8080:8080 catshop:step1
-curl localhost:8080/health
-docker rm -f step1
+```
+pipeline/01-pull-request   the branch looked fine; main was red all weekend
+        /02-triggers       forty runs a day
+        /03-actions        three copies, already drifting
+        /04-real           "we have to actually ship it"
+        /05-expressions    deployed to nothing
+        /06-environments   qa credentials in production
+        /07-reusable       the same two jobs, in four repositories
 ```
 
-**Step 1a is measured, not served.** It builds the app six ways and prints what the cache did;
-nothing to `curl`:
+`.github/workflows/` is what actually runs — **the repository root is the only place
+GitHub reads**:
 
-```bash
-cd 1a-cache
-./cache.sh                                        # eight acts, with timings
-docker buildx build --progress=plain -t catshop:cache-good .   # watch each node decide
-```
-
-**Steps 2 to 5 use Compose:**
-
-```bash
-cd 3-compose-postgres-volume
-cp .env.example .env          # .env is git-ignored and must stay that way
-docker compose up -d --build
-curl localhost:8080/visits
-docker compose down           # add -v to delete the volume too
-```
-
-> **One at a time.** Every step that runs a container publishes host port `8080`. Bring the previous step down first, or
-> `docker ps --filter publish=8080` will tell you who is holding it.
-
-## Seeing what each step changed
-
-The diff *is* the lesson. Exclude the README — the prose differs on every line and would bury the
-three lines of YAML that matter:
-
-```bash
-diff -ru -x README.md -x .env 2-compose-postgres-no-volume 3-compose-postgres-volume
-```
-
-Step 2 → 3 comes out as **one mount plus one `volumes:` key**. That is persistence, entire.
-
-Step 1 → 1a is **one instruction**, and it is the only thing that step changes:
-
-```bash
-diff -u 1-dockerfile/Dockerfile 1a-cache/Dockerfile
-```
-
-1a is a measurement lab on step 1's image and is deliberately **not** in the lineage: step 1b
-continues from step 1, with `--no-cache-dir` rather than the cache mount.
-
-For step 1b, compare inside the folder instead — the same dependencies built two ways:
-
-```bash
-cd 1b-dockerfile-multistage && diff -u Dockerfile.single Dockerfile
-```
-
-The image stops changing at 1b. Steps 2–5 all carry that same multi-stage `Dockerfile`:
-
-```bash
-diff -u 1b-dockerfile-multistage/Dockerfile 5-compose-networks-internal/Dockerfile && echo identical
-```
-
-**So every diff from 1b onwards is Compose, not code.**
-
-## Project names are pinned
-
-Each `compose.yaml` sets a top-level `name:` (`catshop-step2` … `catshop-step5`). Without it the
-project name defaults to the directory name, so volumes and networks would be called
-`3-compose-postgres-volume_pgdata` and would move the moment a folder was renamed. Pinned, they are
-`catshop-step3_pgdata` and `catshop-step5_partnernet`, and every command in the step READMEs keeps
-working.
-
-## Verified, not assumed
-
-Every claim in these READMEs was executed on a real daemon (Docker 29.8.2):
-
-| Check | Result |
+| File | What it shows |
 |---|---|
-| step 2 — `visits` 1, 2, then **1** after `down`/`up` | data loss reproduces |
-| step 2 — `docker diff` shows **no** `/var/lib/postgresql/data`; the mount is an **anonymous volume** (hex name), orphaned by `down` | the real mechanism, not the folklore |
-| step 3 — `visits` 1, 2, then **3** after `down`/`up` | data survives |
-| step 4 — `/price/MK-II` → 200 · `/price/BOOM-1` → **502** · `/price/SLOW-1` → **502 after 2.017 s** | all three failure modes on demand |
-| step 5 — db unreachable from host · app→db by name ok · db→internet no route · partner→internet no route | isolation holds |
-| step 1b — `ms:single` **684 MB** with `gcc 14.2.0`; `ms:multi` **253 MB** with no gcc | 2.7×, same app |
-| step 1a — one line of `app.py` edited: dependencies-first **0 s** (4/5 cached), source-first **6 s** (2/4, pip reran) | ordering is the whole of build performance |
-| step 1a — one **unused** file created: source-first **5 s**, dependencies-first **0 s** (5/5) | the build context is an input, whether you use the file or not |
-| step 1a — `touch` leaves the cache intact; `chmod 600` breaks it and reruns the install | mtime is not in the key, mode is |
-| step 1a — `pip install` layer **42.5 MB** in-image vs **34.4 MB** with a cache mount holding **8.126 MB** | the difference is the wheel cache, to the byte |
-| step 1a — `split-apt` **649 MB** vs `one-layer` **611 MB** | a later `rm` frees nothing |
+| `ci.yml` | chapter 07, the end state. Copy an earlier chapter over it to demo one |
+| `_build-and-test.yml` | the **reusable workflow**: made of jobs, called with `jobs.<id>.uses:`, its own runners and its own checkout |
+| `08-on-main.yml` | the other half of chapter 01. A merge is not an event — it arrives as a push, in a different file, on a different commit, and only this one may deploy |
+| `09-from-outside.yml` | the cron that hopes, replaced — `repository_dispatch` and a run with no commit behind it |
+| `10-message-routes.yml` | 02:00, production down. `build → qa-testing → deploy`, and `[hotfix]` **skips the twenty-minute qa stage** and deploys. The `if:` on `deploy` is the lesson: `needs` hides an `&& success()`, so a skipped stage has to be allowed on purpose |
+| `14-environments.yml` | **the delivery pipeline.** `build → image → sandbox → stage → production` on main; a pull request stops at stage. Each deploy job runs its own qa through one shared action. `ENVIRONMENTS.md` has the setup |
+| `11-anchors.yml` | `&` defines, `*` repeats — and the wrong fix for chapter 03, because an anchor never leaves its file |
+| `15-reuse.yml` | **both units of reuse in one screen** — a composite action used as a step, a reusable workflow used as a job |
+| `13-artifacts.yml` | **what a run leaves behind** — a JUnit report, an HTML coverage report, and the image itself as a tarball, handed to a later job without publishing anything |
+| `12-docs-pages.yml` | the **other half of the path filter**: a docs edit never runs the tests, and republishing to GitHub Pages by hand is where `permissions:` finally earns its keep |
 
-## Secrets
+### The delivery pipeline
 
-`.env` is git-ignored in this repo and must stay that way. `.env.example` carries a placeholder
-(`POSTGRES_PASSWORD=change-me-locally`) and is the only one of the two that is ever committed.
-This applies to your own lab repository too, and it is checked.
+```
+on main    build ─> image ─> sandbox ─> stage ─> production
+on a PR    build ─> image ─> sandbox ─> stage            production is main only
+```
+
+`image` is the only job that builds and the only one that pushes. It publishes to GHCR and
+exports `ghcr.io/<repo>@sha256:…`, so **every environment deploys the same bytes** — a tag can
+be moved between sandbox and production, a digest cannot.
+
+**`needs:` is also what draws the run graph**, one arrow per entry. Every job here names only
+its immediate predecessor and **re-exports the image reference for the next one**, so the graph
+is a clean chain. Writing `needs: [image, stage]` because you want `needs.image.outputs…` also
+works — and adds an edge that jumps two jobs and turns the picture into a cat's cradle. Reading
+an output costs an edge, so pass values down the chain instead.
+
+**The qa run lives inside its deploy job**, not beside it: deploy, then check, in one job. A
+failed check makes that job red, and the next environment never starts — the gate is the plain
+`needs:`, which carries an implicit `&& success()`. The same default that is a nuisance in
+`10-message-routes.yml` and exactly what is wanted here.
+
+**One shared qa action, not three jobs.** `.github/actions/qa` takes the environment as an input
+and a step-level `if:` decides the depth: smoke everywhere, the contract pack anywhere that is
+not production, end-to-end on stage, and read-only checks on production — because no test writes
+to production.
+
+```yaml
+      - uses: ./.github/actions/qa
+        with:
+          environment: stage
+          host: ${{ vars.APP_HOST }}
+```
+
+### A pipeline secret is not an application secret
+
+The deploy steps are identical in all three environments. `vars.APP_HOST` resolves to a
+different host each time, and no job has an `if:` on an environment name.
+
+What is **not** in there is as much of the lesson: no `DATABASE_URL`, no payment key, no signing
+key. Those live in a secret manager, and the **running application** fetches them at startup
+with an identity the platform gives it. The pipeline passes only the *address* —
+`VAULT_ROLE` — so a leaked log or a careless `echo` cannot give away the database.
+
+> **A pipeline secret is a credential for deploying. An application secret is a credential for
+> running, and the pipeline should never see it.**
+
+The approval gate on `production` is a property of the environment, not a step — which is why
+nothing in the file mentions it.
+
+### An artifact is not a registry
+
+| | an artifact | a registry |
+|---|---|---|
+| addressed by | this run's id | a name, from anywhere |
+| lives | days or weeks, then deleted | until somebody deletes it |
+| who reads it | a human on the run page, or a later job in the same run | anything that can pull, including production |
+| good for | **evidence** — reports, logs, coverage, a build output under review | **deliverables** — the image you deploy |
+
+`13-artifacts.yml` produces all three and makes the distinction do work: on a pull request the
+image is written to a tarball with `outputs: type=docker,dest=…`, uploaded, and `docker load`ed
+by a **later job on a different machine** — the thing people reach for a registry to do, done
+without publishing anything. `ci.yml` publishes to GHCR instead, because that image is a
+deliverable and a pull request's is not.
+
+### `paths:` is only worth teaching as a pair
+
+`ci.yml` subscribes to `ci-base-app/**`; `12-docs-pages.yml` subscribes to `docs/**`. One push
+matches exactly one of them, and a typo in the runbook no longer sits through a docker build.
+Showing the filter on its own just looks like extra typing.
+
+`12-docs-pages.yml` is also the honest `permissions:` example — publishing to Pages needs
+`pages: write` and `id-token: write`, and the second one is OIDC where you can see it: the deploy
+holds no key, it asks GitHub to vouch for the run.
+
+### `.github/actions/`
+
+`install-and-test` and `qa` — both **composite actions**: your own steps, behind one `uses:`, running on the caller's
+machine. Chapters 03–06, the reusable workflow and `10-message-routes.yml` all use it.
