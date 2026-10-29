@@ -23,6 +23,12 @@ on:
       digest:
         description: the image we built, by digest
         value: ${{ jobs.image.outputs.digest }}
+      ref:
+        description: image@digest — echoed back so the caller can chain on this job alone
+        value: ${{ inputs.image }}@${{ jobs.image.outputs.digest }}
+      tag:
+        description: the tag it was given, echoed back for the same reason
+        value: ${{ inputs.tag }}
     # a called workflow gets no secrets unless they are named here, or the
     # caller says `secrets: inherit`
     secrets:

@@ -118,8 +118,10 @@ jobs:
       packages: write
 
   smoke:
-    needs: [meta, verify]
-    if: needs.meta.outputs.publish == 'yes'
+    needs: verify
+    outputs:
+      ref: ${{ needs.verify.outputs.ref }}
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: docker/login-action@v3
@@ -131,7 +133,7 @@ jobs:
       - name: run what we just published, BY DIGEST
         run: |
           # a tag can be moved. A digest is the bytes.
-          ref='${{ needs.meta.outputs.image }}@${{ needs.verify.outputs.digest }}'
+          ref='${{ needs.verify.outputs.ref }}'
           docker run -d --name shop -p 8080:8080 "$ref"
           for i in $(seq 1 20); do curl -fsS localhost:8080/health && break; sleep 1; done
           curl -fsS localhost:8080/health
@@ -141,7 +143,8 @@ jobs:
 
   report:
     # `needs` is wait-for. `always()` turns off the hidden "and all green".
-    needs: [meta, verify, smoke]
+    # the one legitimate fan-in: a report reads what everything else did
+    needs: [verify, smoke, deploy-production]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -155,7 +158,7 @@ jobs:
 
       - name: only on the default branch
         if: github.ref == 'refs/heads/main'
-        run: echo "published ${{ needs.meta.outputs.tag }}"
+        run: echo "published ${{ needs.verify.outputs.tag }}"
 
       - name: only when something above went red
         if: contains(needs.*.result, 'failure')
@@ -165,8 +168,9 @@ jobs:
         run: echo "which is why upload-artifact needs always() to survive a red build"
 
   deploy-qa:
-    needs: [meta, smoke]
-    if: needs.meta.outputs.publish == 'yes'
+    needs: smoke
+    outputs:
+      ref: ${{ needs.smoke.outputs.ref }}
     runs-on: ubuntu-latest
     environment: qa          # decides which vars and secrets exist here
     env:
@@ -182,7 +186,7 @@ jobs:
         run: |
           echo "host      ${{ vars.APP_HOST }}"
           echo "replicas  ${{ vars.REPLICAS }}"
-          echo "image     ${{ needs.meta.outputs.image }}:${{ needs.meta.outputs.tag }}"
+          echo "image     ${{ needs.smoke.outputs.ref }}"
           # an address, not a password. The app reads the vault at startup.
           echo "vault     ${{ vars.VAULT_ROLE }}"
           echo "token len ${#TOKEN}"
@@ -190,7 +194,7 @@ jobs:
           TOKEN: ${{ secrets.DEPLOY_TOKEN }}
 
   deploy-production:
-    needs: [meta, deploy-qa]
+    needs: deploy-qa
     runs-on: ubuntu-latest
     environment: production  # same key names, different values, and a reviewer
     steps:
@@ -198,4 +202,4 @@ jobs:
         run: |
           echo "::add-mask::$(echo hunter2)"
           echo "host      ${{ vars.APP_HOST }}"
-          echo "deploying ${{ needs.meta.outputs.tag }}"
+          echo "deploying ${{ needs.deploy-qa.outputs.ref }}"
