@@ -17,7 +17,7 @@ Located in `docker/`, each example builds on the base application to demonstrate
 ## GitHub Actions
 
 One team's pipeline over one term. `pipeline/` holds the chapters — the same `ci.yml`,
-seven times, one new segment each, and every chapter exists because the one before it
+ten times, one new segment each, and every chapter exists because the one before it
 hurt. `pipeline/README.md` has the table, the diff commands, and the composite-action
 versus reusable-workflow comparison.
 
@@ -29,7 +29,23 @@ pipeline/01-pull-request   the branch looked fine; main was red all weekend
         /05-expressions    deployed to nothing
         /06-environments   qa credentials in production
         /07-reusable       the same two jobs, in four repositories
+        /08-publish        the image built, then the machine was deleted
+        /09-promote        four environments, four builds, four different bytes
+        /10-cache-deps     nine of the nine minutes were downloads
+        /11-cache-layers   and none of that helped the docker build
+        /12-cache-testcontainers   Postgres pulled and the image rebuilt, every run
+        /13-coverage-gate  the coverage number nobody was blocking on
 ```
+
+`cache/` is the four ways something moves between steps, jobs and runs — a file, an
+artifact, an output, a cache — as the same two jobs four times with one mechanism
+swapped, and one rule for choosing between them. `retry/` is the other half of that
+story: there is no automatic job retry, only `GITHUB_RUN_ATTEMPT` and whatever loop you
+write, so both files are about keeping it **bounded**.
+
+`by-hand/` is the same material with the actions removed — `checkout`, `login-action`,
+`buildx`, `cache` and `upload-artifact`, each written out as the shell it is, with the
+action and the script running side by side in one file.
 
 `.github/workflows/` is what actually runs — **the repository root is the only place
 GitHub reads**:

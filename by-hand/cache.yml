@@ -1,0 +1,96 @@
+# by hand: actions/cache
+#
+# The whole action, in four moves:
+#
+#   1. hash the lockfile              -> that string is the key
+#   2. ask the service for the key    -> hit, prefix hit, or nothing
+#   3. tar the directory in or out
+#   4. on the way out, do it in a POST-step, after the job, only if it passed
+#
+# There is no mounting, no magic filesystem and no shared disk. A restore
+# RE-CREATES files from a tarball somebody else is keeping for you.
+name: by-hand-cache
+
+on: { workflow_dispatch: }
+
+jobs:
+  the-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: c
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+      - run: pip install -r ci-base-app/requirements.txt
+      - run: echo "exact hit = ${{ steps.c.outputs.cache-hit }}"
+      # the save you never wrote is in the log as "Post Run actions/cache".
+
+  by-hand:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 1 - the key is a string you invented
+        id: key
+        run: |
+          # this is all hashFiles() is: content in, hex out. Edit a dependency
+          # and the key changes by itself; that is the point.
+          K="pip-$RUNNER_OS-$(cat ci-base-app/requirements*.txt | sha256sum | cut -c1-16)"
+          echo "key=$K" >> "$GITHUB_OUTPUT"
+          echo "$K"
+          # a key that never changes is a cache that is never refreshed, and a
+          # key that changes every commit is a cache that is never hit.
+
+      - name: 2 - where the tarball goes
+        run: |
+          # the two variables the cache service is reached through. They are in
+          # every job's environment, they are NOT in the `env` context, and they
+          # are the reason you do not need any third party for this.
+          #   ACTIONS_RESULTS_URL    the current cache service (v2)
+          #   ACTIONS_CACHE_URL      the older endpoint, still set on some runners
+          #   ACTIONS_RUNTIME_TOKEN  a bearer token, scoped to this run
+          env | grep -o '^ACTIONS_[A-Z_]*' | sort
+          echo "the token, first 12 chars only: ${ACTIONS_RUNTIME_TOKEN:0:12}..."
+          # Honest caveat: v2 of that service speaks protobuf, so the real
+          # upload is not a one-line curl any more. The SHAPE is unchanged -
+          # authenticated HTTP, a key, a tarball - and the action is a client
+          # for it, which is exactly what it would be if you wrote it yourself.
+
+      - name: 3 - the tar, which is the part that is really all it is
+        run: |
+          mkdir -p ~/.cache/pip
+          pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
+          du -sh ~/.cache/pip
+
+          # save
+          tar -C "$HOME" -czf "/tmp/${{ steps.key.outputs.key }}.tgz" .cache/pip
+          ls -lh /tmp/*.tgz
+
+          # restore, onto a machine that has nothing
+          rm -rf ~/.cache/pip
+          tar -C "$HOME" -xzf "/tmp/${{ steps.key.outputs.key }}.tgz"
+          du -sh ~/.cache/pip
+          # note what came back: FILES. Not a mount, not a link. If the tarball
+          # were missing this step would simply be slower, which is the test for
+          # "is this a cache or an artifact".
+
+  # 4 - the ordering, which is where the surprises live
+  #
+  #   · restore is a STEP and runs where you put it
+  #   · save is a POST-step: after every step, and only if the job SUCCEEDED
+  #   · so the first run after a key change is slow, and a job that keeps
+  #     failing stays slow forever - it never gets to save
+  #   · and because a cache is scoped by GITHUB_REF, not by workflow or job
+  #     identity, every workflow on this branch reads every cache on it
+  #
+  # Which makes a restored cache UNTRUSTED INPUT. Never put a secret in one.
+  scope:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "this cache scope is  $GITHUB_REF"
+          echo "a PR run also reads  the base branch, read-only"
+          echo "a fork PR            reads the default branch scope, read-only"

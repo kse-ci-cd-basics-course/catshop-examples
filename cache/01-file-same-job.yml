@@ -1,0 +1,36 @@
+# 01 — a file, inside one job
+#
+# The cheapest mechanism, and the only one that needs no declaration at all:
+# two steps in the same job share a disk, because they are literally on the
+# same machine.
+#
+# The point of this file is the SECOND job, which proves the limit.
+name: cache-demo-file
+
+on: { workflow_dispatch: }
+
+jobs:
+  one-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: step A writes
+        run: echo "built at $(date -u +%T) by run $GITHUB_RUN_ID" > report.txt
+
+      - name: step B reads, with nothing declared anywhere
+        run: cat report.txt
+
+      - name: and it is a normal filesystem
+        run: |
+          mkdir -p out && cp report.txt out/
+          ls -la . out
+
+  another-job:
+    needs: one-job
+    runs-on: ubuntu-latest
+    steps:
+      # a different machine. Not a different folder - a different machine.
+      - name: the same path, on a box that has never seen it
+        run: |
+          echo "workspace: $GITHUB_WORKSPACE"
+          ls -la
+          test -f report.txt && echo "found it (impossible)" || echo "no such file - as expected"

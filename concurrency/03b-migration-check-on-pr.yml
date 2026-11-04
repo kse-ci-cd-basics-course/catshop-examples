@@ -1,0 +1,42 @@
+# concurrency 03b — what a pull request gets INSTEAD
+#
+# Blocking the apply is only half an answer: a contributor still needs to know
+# their migration is valid before it merges. So the pull request gets a check
+# that READS the script and never runs it against anything shared.
+#
+# This is the same split as the image in chapter 04: a pull request builds and
+# does not publish. Here it validates and does not apply.
+name: migration-check
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/**'
+
+# a pull request build IS safe to cancel: the commit is superseded and the
+# answer is already worthless. Contrast this with every group in 01-03.
+concurrency:
+  group: migration-check-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the script parses, is ordered, and is reversible
+        run: |
+          ls -1 migrations/
+          echo "lint the SQL, assert one migration per pull request,"
+          echo "assert a down-migration exists — all without touching"
+          echo "a database anybody else can see."
+
+      # the honest way to try a migration on a pull request: a throwaway
+      # database that belongs to THIS job and dies with the runner.
+      - name: apply it to a database nobody else shares
+        run: |
+          docker run -d --name pr-db -e POSTGRES_PASSWORD=x -p 5432:5432 postgres:16
+          echo "apply migrations/ here. It is a fresh schema, it is this job's"
+          echo "alone, and it goes away when the machine does — so there is no"
+          echo "shared thing to serialise and no group needed."

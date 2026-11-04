@@ -1,0 +1,38 @@
+# 02 — an artifact: files, and they must arrive
+#
+# Same two jobs. The file now crosses, because this run uploaded it somewhere
+# that outlives the machine.
+#
+# Use an artifact when a MISSING file should FAIL the job.
+name: cache-demo-artifact
+
+on: { workflow_dispatch: }
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "built at $(date -u +%T) by run $GITHUB_RUN_ID" > report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report.txt
+          retention-days: 1
+          # the default is `error` - an upload that finds nothing fails the step,
+          # which is the whole difference between this file and 04.
+          if-no-files-found: error
+
+  consume:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: report }
+      - run: cat report.txt
+
+      # the discipline that goes with the promise: if it can be missing, check.
+      - run: test -s report.txt || { echo "artifact was empty"; exit 1; }
+
+      # Also true, and the reason an artifact is not a cache: it is visible on
+      # the run page, it counts against storage, and it keeps for 90 days by
+      # default. Nothing secret goes in one.

@@ -1,0 +1,79 @@
+# by hand: actions/upload-artifact + actions/download-artifact
+#
+# Same shape as the cache - zip it, HTTP it, somebody keeps it - and a different
+# promise:
+#
+#   cache     may be empty. If it is, the job is slower.
+#   artifact  may not be empty. If it is, the job must fail.
+#
+# That one difference is the whole decision, and it is why the image handed from
+# a build job to a test job is an artifact and never a cache.
+name: by-hand-artifact
+
+on: { workflow_dispatch: }
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p out
+          echo "run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT" > out/report.txt
+          echo "$GITHUB_SHA" > out/revision.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: out/
+          retention-days: 1
+          # defaults worth knowing: 90 days, counted against repository storage,
+          # downloadable from the run page by anyone who can see the repository.
+          # So: nothing secret goes in an artifact either.
+
+  consume:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: report }
+      - run: cat report.txt revision.txt
+
+      # if-no-files-found: error is the default on upload, and the matching
+      # discipline on download is to CHECK. An empty download that nobody
+      # checked is the Barsik bug: a green step and an empty directory.
+      - run: test -s report.txt || { echo "artifact was empty"; exit 1; }
+
+  by-hand:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      # the download half really is one API call plus unzip. `gh` is
+      # preinstalled on every hosted runner and GITHUB_TOKEN is enough.
+      - name: list what this run produced
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[] | "\(.name)\t\(.size_in_bytes) bytes\texpires \(.expires_at)"'
+
+      - name: fetch it without the action
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                 --jq '.artifacts[] | select(.name=="report") | .id')
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ID/zip" > report.zip
+          unzip -o report.zip
+          cat report.txt
+          # an artifact is a ZIP. That is why a single file comes back wrapped,
+          # why permissions are lost, and why a tarball inside the artifact is
+          # the usual answer for a docker image or anything executable.
+
+      # The upload half is not a plain PUT any more - v4 of the artifact service
+      # has its own protocol, same as the cache - so this is the one place where
+      # "write it yourself" stops being reasonable. The read side above is the
+      # part worth knowing: an artifact is just a zip behind an API you already
+      # have a token for, which is how a coverage gate in a later job gets its
+      # numbers without rerunning the tests.
+      - run: echo "cross-run too - gh run download <run-id> -n report" >> "$GITHUB_STEP_SUMMARY"

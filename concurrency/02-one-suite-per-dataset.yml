@@ -1,0 +1,58 @@
+# concurrency 02 — one suite per dataset
+#
+# THE PAIN
+# The QA suite seeds the shop with three cats, then asserts the shop has three
+# cats. Two runs start on sandbox at the same time: both seed, both assert three,
+# both see six. Both go red.
+#
+# NEITHER RUN IS WRONG. There is no bug in the suite and no bug in the shop. The
+# test is correct and the result is false, which is the single most expensive kind
+# of failure to debug — people go looking in the application.
+#
+# THE GUARD
+# The group names the DATASET, which here is the environment's database. It is a
+# different group from 01 on purpose: a deploy and a suite may safely overlap
+# with each other, but two suites may not.
+#
+# cancel-in-progress is FALSE again, and for a second reason: a suite killed
+# half way through has already seeded its rows and will never reach its teardown,
+# so cancelling does not undo it — it leaves the mess behind for the next run.
+name: qa
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [sandbox, integration, stage]
+        default: sandbox
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    concurrency:
+      group: qa-dataset-${{ inputs.environment }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: seed, assert, tear down
+        env:
+          BASE_URL: ${{ vars.APP_BASE_URL }}
+          SUITE: ${{ vars.QA_SUITE }}
+        run: |
+          # the shape that breaks when two of these overlap:
+          #   POST /cats x3
+          #   GET  /cats   -> expect 3
+          #   DELETE /cats
+          echo "running the $SUITE suite against $BASE_URL"
+          echo "this suite OWNS the dataset while it runs. That is the whole"
+          echo "reason it needs a concurrency group of its own."

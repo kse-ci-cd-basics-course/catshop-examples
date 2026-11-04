@@ -1,0 +1,64 @@
+# 04 — a cache: files again, and it is allowed to be empty
+#
+# Same two jobs one last time. The cache DOES cross a job boundary and it DOES
+# cross runs - natively, no third party. What it does not do is promise.
+#
+# Use a cache when a MISSING file should only make the job SLOWER.
+name: cache-demo-cache
+
+on: { workflow_dispatch: }
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: c
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+
+      - run: pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
+      - run: echo "exact hit on the way in = ${{ steps.c.outputs.cache-hit }}"
+      # the SAVE is not here. It is a post-step: it runs after the last step of
+      # this job, and only if the job succeeded. A job that keeps failing never
+      # saves, which is why a broken pipeline also stays a slow one.
+
+  consume:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # restore-only: this job reads what the other one saved and never writes.
+      - id: c
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+
+      - name: the job works either way - that is the test
+        run: |
+          echo "hit = ${{ steps.c.outputs.cache-hit }}"
+          ls ~/.cache/pip 2>/dev/null | head -5 || echo "cold. carrying on anyway"
+          pip install -r ci-base-app/requirements.txt    # slower when cold, still correct
+
+  # Two facts that decide where a cache can be read from, and they are not about
+  # your workflow at all:
+  #
+  #   scope      a cache belongs to a REF (GITHUB_REF), not to a workflow or a
+  #              job. Every workflow on this branch reads every cache on it, and
+  #              a pull request also reads the base branch, read-only.
+  #   limits     10 GB per repository, and an entry not read for 7 days is
+  #              evicted. Nothing you put here is storage.
+  #
+  # Which is why: never put a secret in a cache, and never pass a build artifact
+  # through one. See 12-cache-testcontainers for the version that measures.
+  scope:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "this run's cache scope is $GITHUB_REF"

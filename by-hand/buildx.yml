@@ -1,0 +1,71 @@
+# by hand: docker/setup-buildx-action + docker/build-push-action
+#
+# Two actions, and they do different kinds of work:
+#
+#   setup-buildx-action   installs a BUILDER. Without it `docker build` uses the
+#                         classic builder, which has no --cache-to at all.
+#   build-push-action     assembles one long `docker buildx build` command line.
+#
+# So the first one is not optional ceremony, and the second one is a string.
+name: by-hand-buildx
+
+on: { workflow_dispatch: }
+
+jobs:
+  the-actions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          tags: catshop:by-action
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  by-hand:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: what the preinstalled runner already has
+        run: |
+          docker buildx version
+          docker buildx ls            # the default builder is the docker driver
+          # the docker driver cannot export a cache. That is the whole reason
+          # setup-buildx-action exists.
+
+      - name: the builder, by hand
+        run: |
+          docker buildx create --name course --driver docker-container --use
+          docker buildx inspect --bootstrap | head -20
+          # docker-container driver = BuildKit in a container on this machine,
+          # which is what can read and write an external cache.
+
+      - name: the build, by hand
+        env:
+          # the two variables the gha cache backend needs. They are injected
+          # into every job and they are NOT in the `env` context, so you can
+          # only see them from a shell.
+          #   ACTIONS_RESULTS_URL   the current cache service (v2)
+          #   ACTIONS_CACHE_URL     the previous one; still set on some runners
+          #   ACTIONS_RUNTIME_TOKEN the bearer token for both
+          CACHE_DEBUG: '1'
+        run: |
+          env | grep -o '^ACTIONS_[A-Z_]*' | sort
+
+          docker buildx build ci-base-app \
+            --file ci-base-app/Dockerfile \
+            --tag catshop:by-hand \
+            --cache-from type=gha,scope=by-hand \
+            --cache-to   type=gha,scope=by-hand,mode=max \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --load
+          # --load, --push and --output are the same knob. The build produces
+          # bytes and you must say where they go, because by default they go
+          # into the builder's own store and nowhere else - which is the
+          # "where is my image" question from lab 1.
+
+      - run: docker image inspect catshop:by-hand --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'

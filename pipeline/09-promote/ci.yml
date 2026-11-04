@@ -1,0 +1,77 @@
+# 09 — the same bytes, all the way through
+#
+# A tag is a pointer anybody can move. Marsik moved one on a Tuesday and the
+# rollback target lost its name - no event, no run, no record that anything
+# changed.
+#
+# So: build ONCE, carry the DIGEST forward, and never rebuild per environment.
+# A pipeline that rebuilds per environment has not deployed what it tested.
+#
+# NEW: a digest passed between jobs as an output · pulling BY DIGEST ·
+#      one job definition reused per environment with a matrix
+name: promote
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+
+  # ONE job definition, run once per environment, in order. Each environment
+  # receives the same digest the build emitted - nothing is rebuilt and nothing
+  # is retagged into existence.
+  promote:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1          # sandbox must finish before stage starts
+      matrix:
+        environment: [sandbox, stage]
+    environment: ${{ matrix.environment }}
+    concurrency:
+      # one deployment per environment at a time, and NEVER cancelled:
+      # a half-applied deploy is worse than a late one.
+      group: deploy-${{ matrix.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: run exactly the bytes that were tested
+        run: |
+          # @sha256:... not :latest, and not :${{ github.sha }} either -
+          # a tag is a pointer and the digest is the content.
+          REF='${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}'
+          echo "deploying $REF to ${{ matrix.environment }}"
+          docker run -d --name app -p 8080:8080 "$REF"
+          for i in $(seq 1 20); do curl -fsS localhost:8080/health && break; sleep 1; done
+          curl -fsS localhost:8080/health

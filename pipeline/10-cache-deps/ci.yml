@@ -1,0 +1,65 @@
+# 10 — the nine minutes were downloads
+#
+# Forty-eight matrix jobs, each spending four of its nine minutes installing the
+# same packages from the network. The job is correct and the bill is nonsense.
+#
+# NEW: actions/cache · key vs restore-keys · hashFiles · `pip cache dir`
+#      · a per-OS path attached with matrix include
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false        # one red row must not cancel the comparison
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ['3.11', '3.12']
+        # include ATTACHES a value to each existing row. It adds no jobs here.
+        include:
+          - { os: ubuntu-latest,  path: ~/.cache/pip }
+          - { os: macos-latest,   path: ~/Library/Caches/pip }
+          - { os: windows-latest, path: ~\AppData\Local\pip\Cache }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # The honest way: ask pip where its cache is, rather than hardcoding a
+      # path that is correct on exactly one of these three runners.
+      # (The matrix.path above is the other way, and is here to be compared.)
+      - id: pip-cache
+        shell: bash
+        run: echo "dir=$(pip cache dir)" >> "$GITHUB_OUTPUT"
+
+      - id: deps
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          # the key must change when the CONTENTS should. hashFiles hashes the
+          # file's content, so editing a dependency is a new key automatically.
+          # runner.os is in it because a Linux cache on Windows is worse than none.
+          key: pip-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('**/requirements*.txt') }}
+          # a prefix, tried newest first. An old tree plus three new packages
+          # still beats downloading four hundred.
+          restore-keys: |
+            pip-${{ runner.os }}-${{ matrix.python }}-
+            pip-${{ runner.os }}-
+
+      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
+
+      - run: pytest ci-base-app/tests -q
+
+      # the only feedback the mechanism gives you. cache-hit is true ONLY on an
+      # exact key match - a restore-keys prefix hit reports false.
+      - run: |
+          echo "| ${{ matrix.os }} / ${{ matrix.python }} | exact hit: ${{ steps.deps.outputs.cache-hit }} |" \
+            >> "$GITHUB_STEP_SUMMARY"
