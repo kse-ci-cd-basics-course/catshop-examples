@@ -1,96 +1,153 @@
 # by hand: actions/cache
 #
-# The whole action, in four moves:
+# Not a simulation. This talks to the SAME cache service the action talks to,
+# with curl, in four calls:
 #
-#   1. hash the lockfile              -> that string is the key
-#   2. ask the service for the key    -> hit, prefix hit, or nothing
-#   3. tar the directory in or out
-#   4. on the way out, do it in a POST-step, after the job, only if it passed
+#   1. CreateCacheEntry        -> a signed upload URL
+#   2. PUT the tarball to it   -> the bytes land in blob storage
+#   3. FinalizeCacheEntryUpload-> the entry becomes visible, with an id
+#   4. GetCacheEntryDownloadURL-> a signed download URL, in another job
 #
-# There is no mounting, no magic filesystem and no shared disk. A restore
-# RE-CREATES files from a tarball somebody else is keeping for you.
+# Two things are already in every job and nobody put them there:
+#   ACTIONS_RESULTS_URL    the cache service
+#   ACTIONS_RUNTIME_TOKEN  a bearer token, scoped to this run
+#
+# The service is twirp: POST /twirp/<service>/<Method>, JSON in, JSON out.
 name: by-hand-cache
 
 on: { workflow_dispatch: }
 
+permissions:
+  contents: read
+  actions: read          # only for the REST listing at the end
+
+env:
+  SVC: github.actions.results.api.v1.CacheService
+  CACHE_PATH: ~/.cache/pip
+
 jobs:
+  # the reference, for comparison. One step, and it does all of the below.
   the-action:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - id: c
-        uses: actions/cache@v6
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
-          restore-keys: pip-${{ runner.os }}-
-      - run: pip install -r ci-base-app/requirements.txt
-      - run: echo "exact hit = ${{ steps.c.outputs.cache-hit }}"
-      # the save you never wrote is in the log as "Post Run actions/cache".
+      - run: pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
 
-  by-hand:
+  save:
     runs-on: ubuntu-latest
+    outputs:
+      key: ${{ steps.id.outputs.key }}
+      version: ${{ steps.id.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: 1 - the key is a string you invented
-        id: key
+      - name: 1 - the key and the version
+        id: id
         run: |
-          # this is all hashFiles() is: content in, hex out. Edit a dependency
-          # and the key changes by itself; that is the point.
-          K="pip-$RUNNER_OS-$(cat ci-base-app/requirements*.txt | sha256sum | cut -c1-16)"
-          echo "key=$K" >> "$GITHUB_OUTPUT"
-          echo "$K"
-          # a key that never changes is a cache that is never refreshed, and a
-          # key that changes every commit is a cache that is never hit.
+          # the KEY is yours to invent. hashFiles() is this, and nothing more.
+          KEY="by-hand-pip-$RUNNER_OS-$(cat ci-base-app/requirements*.txt | sha256sum | cut -c1-16)"
+          # the VERSION is the service's idea of "same shape of cache": the
+          # action hashes the path set plus the compression method. Save and
+          # restore only have to agree on it.
+          VER="$(printf '%s|gzip' "$CACHE_PATH" | sha256sum | cut -d' ' -f1)"
+          echo "key=$KEY"     >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "key     $KEY"
+          echo "version $VER"
 
-      - name: 2 - where the tarball goes
-        run: |
-          # the two variables the cache service is reached through. They are in
-          # every job's environment, they are NOT in the `env` context, and they
-          # are the reason you do not need any third party for this.
-          #   ACTIONS_RESULTS_URL    the current cache service (v2)
-          #   ACTIONS_CACHE_URL      the older endpoint, still set on some runners
-          #   ACTIONS_RUNTIME_TOKEN  a bearer token, scoped to this run
-          env | grep -o '^ACTIONS_[A-Z_]*' | sort
-          echo "the token, first 12 chars only: ${ACTIONS_RUNTIME_TOKEN:0:12}..."
-          # Honest caveat: v2 of that service speaks protobuf, so the real
-          # upload is not a one-line curl any more. The SHAPE is unchanged -
-          # authenticated HTTP, a key, a tarball - and the action is a client
-          # for it, which is exactly what it would be if you wrote it yourself.
-
-      - name: 3 - the tar, which is the part that is really all it is
+      - name: fill the directory with something worth caching
         run: |
           mkdir -p ~/.cache/pip
           pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
           du -sh ~/.cache/pip
 
-          # save
-          tar -C "$HOME" -czf "/tmp/${{ steps.key.outputs.key }}.tgz" .cache/pip
-          ls -lh /tmp/*.tgz
+      - name: 2 - tar it, exactly as the action does
+        run: |
+          tar -C "$HOME" -czf /tmp/cache.tgz .cache/pip
+          ls -l /tmp/cache.tgz
 
-          # restore, onto a machine that has nothing
-          rm -rf ~/.cache/pip
-          tar -C "$HOME" -xzf "/tmp/${{ steps.key.outputs.key }}.tgz"
-          du -sh ~/.cache/pip
-          # note what came back: FILES. Not a mount, not a link. If the tarball
-          # were missing this step would simply be slower, which is the test for
-          # "is this a cache or an artifact".
+      - name: 3 - ask the service for somewhere to put it
+        id: create
+        run: |
+          # this is the whole authentication story: a token the job already has
+          RESP=$(curl -sS -X POST "$ACTIONS_RESULTS_URL/twirp/$SVC/CreateCacheEntry" \
+            -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg k '${{ steps.id.outputs.key }}' \
+                         --arg v '${{ steps.id.outputs.version }}' \
+                         --arg r "$GITHUB_REPOSITORY_ID" \
+                  '{metadata:{repository_id:$r,scope:[]},key:$k,version:$v}')")
+          echo "$RESP" | jq -r 'del(.signed_upload_url) | .'   # the URL is a credential
+          URL=$(jq -r '.signed_upload_url // empty' <<<"$RESP")
+          [ -n "$URL" ] || { echo "::error::no upload url — $RESP"; exit 1; }
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-  # 4 - the ordering, which is where the surprises live
-  #
-  #   · restore is a STEP and runs where you put it
-  #   · save is a POST-step: after every step, and only if the job SUCCEEDED
-  #   · so the first run after a key change is slow, and a job that keeps
-  #     failing stays slow forever - it never gets to save
-  #   · and because a cache is scoped by GITHUB_REF, not by workflow or job
-  #     identity, every workflow on this branch reads every cache on it
-  #
-  # Which makes a restored cache UNTRUSTED INPUT. Never put a secret in one.
-  scope:
+      - name: 4 - PUT the bytes
+        run: |
+          # blob storage, not GitHub. x-ms-blob-type is what makes it a block blob.
+          curl -sS -f -X PUT "${{ steps.create.outputs.url }}" \
+            -H "x-ms-blob-type: BlockBlob" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @/tmp/cache.tgz
+          echo "uploaded $(stat -c%s /tmp/cache.tgz) bytes"
+
+      - name: 5 - finalise, which is what makes the entry exist
+        run: |
+          SIZE=$(stat -c%s /tmp/cache.tgz)
+          curl -sS -X POST "$ACTIONS_RESULTS_URL/twirp/$SVC/FinalizeCacheEntryUpload" \
+            -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg k '${{ steps.id.outputs.key }}' \
+                         --arg v '${{ steps.id.outputs.version }}' \
+                         --arg s "$SIZE" \
+                         --arg r "$GITHUB_REPOSITORY_ID" \
+                  '{metadata:{repository_id:$r,scope:[]},key:$k,size_bytes:$s,version:$v}')" | jq .
+          # entry_id in that response is the id the REST API will list.
+
+  restore:
+    needs: save
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo "this cache scope is  $GITHUB_REF"
-          echo "a PR run also reads  the base branch, read-only"
-          echo "a fork PR            reads the default branch scope, read-only"
+      - name: 6 - ask where to read it from
+        id: get
+        run: |
+          # restore_keys is a list of PREFIXES, newest match wins. Same idea as
+          # the action's restore-keys, because it is the same call.
+          RESP=$(curl -sS -X POST "$ACTIONS_RESULTS_URL/twirp/$SVC/GetCacheEntryDownloadURL" \
+            -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg k '${{ needs.save.outputs.key }}' \
+                         --arg v '${{ needs.save.outputs.version }}' \
+                         --arg r "$GITHUB_REPOSITORY_ID" \
+                  '{metadata:{repository_id:$r,scope:[]},key:$k,restore_keys:["by-hand-pip-"],version:$v}')")
+          echo "$RESP" | jq -r 'del(.signed_download_url) | .'
+          URL=$(jq -r '.signed_download_url // empty' <<<"$RESP")
+          [ -n "$URL" ] || { echo "::warning::cold — no entry for that key"; exit 0; }
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: 7 - and it is just a tarball
+        if: steps.get.outputs.url != ''
+        run: |
+          curl -sS -f -o /tmp/restored.tgz "${{ steps.get.outputs.url }}"
+          tar -C "$HOME" -xzf /tmp/restored.tgz
+          du -sh ~/.cache/pip
+          # FILES came back. Not a mount, not a link - the same thing the
+          # action's "Cache restored from key:" line means.
+
+      - name: and the entry is visible to the REST API too
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # /actions/caches is the MANAGEMENT api: list and delete, no bytes.
+          # This is the call the lab 2 grader makes to prove a cache exists.
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches" \
+            --jq '.actions_caches[] | "\(.id)\t\(.key)\t\(.size_in_bytes) bytes\t\(.ref)"'
+
+  # What the real action adds on top of these four calls: retries, chunked
+  # uploads for large archives, zstd when it is available, Windows paths, and
+  # deleting the archive afterwards. Not a different idea - the same four calls
+  # with the sharp edges filed off.

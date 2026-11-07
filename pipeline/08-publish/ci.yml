@@ -27,8 +27,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: ci-base-app/requirements*.txt
+      # no cache anywhere in this chapter, on purpose: every run downloads the
+      # same packages again. Time it, and keep the number for chapter 10.
       - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
       - run: pytest ci-base-app/tests -q
 

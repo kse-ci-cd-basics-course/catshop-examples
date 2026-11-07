@@ -19,6 +19,11 @@ ten times, one new segment each. Every chapter exists because the one before it 
 | 13 | `13-coverage-gate` | the coverage report has gone into an artifact nobody opens for three weeks | `download-artifact` across a matrix · `merge-multiple` · a `--fail-under` that fails the job · the check branch protection names | 68 |
 | 07 | `07-reusable` | four repositories run the same test-and-build pair | **a reusable workflow** — `workflow_call`, `jobs.<id>.uses:`, typed inputs, `secrets: inherit`, outputs that come back | 199 |
 
+**No chapter before 10 caches anything, on purpose.** Chapters 01–09 download the same
+packages and rebuild the same layers on every run, so the nine minutes in chapter 10 are a
+number the room has already watched happen rather than a claim. If you are lifting one of
+these files into a real pipeline, add the cache back.
+
 **The diff is the lesson:**
 
 ```bash
@@ -46,11 +51,14 @@ compose into a job, jobs compose into a workflow.
 GitHub reads workflows from **`.github/workflows/` at the repository root** and nowhere
 else. Everything in here is reading material — a `ci.yml` in a subfolder is a text file.
 
-`.github/workflows/ci.yml` is chapter 07, the end state. To demo an earlier one:
+`.github/workflows/` holds **the finished pipeline** — `pull-request.yml` and `main.yml` —
+not a chapter. Chapter 07 is where the chapters stop; the finished pipeline is what the
+course recommends you end up with, and lab 2 is marked on that shape. To demo a chapter,
+copy it in beside them:
 
 ```bash
-cp pipeline/02-triggers/ci.yml .github/workflows/ci.yml
-git commit -am "chapter 2" && git push
+cp pipeline/02-triggers/ci.yml .github/workflows/
+git commit -am "demo: chapter 2" && git push
 ```
 
 ## The publish, cache and gate chapters are out of sequence on purpose
@@ -91,25 +99,30 @@ it: no automatic job retry exists, so a retry is a bounded loop you wrote, and
 
 ## `../by-hand/` is the same material with the actions removed
 
-Five files that write out what `checkout`, `login-action`, `buildx`, `cache` and
-`upload-artifact` are doing — `git init` and a token, `--password-stdin` and a base64
+Six files that write out what `checkout`, `login-action`, `buildx`, `docker push`, `cache`
+and `upload-artifact` are doing — `git init` and a token, `--password-stdin` and a base64
 blob, one long `docker buildx build`, `sha256sum` plus `tar`, and a zip behind an API.
-Each has a `the-action:` job and a `by-hand:` job so the two logs can be read side by
-side. `../by-hand/README.md` has the table and the two honest caveats.
+Each has an action job and a by-hand job so the two logs can be read side by side. Three
+of them are real HTTP rather than a sketch: the cache service in four curls, a GHCR push
+in five, and the layer cache found in the store it really lives in.
+`../by-hand/README.md` has the table.
 
-## The four that are not chapters
+## The ones that are not chapters have moved out
 
-`08-on-main.yml`, `09-from-outside.yml`, `10-message-routes.yml`, `11-anchors.yml` and
-`12-docs-pages.yml` sit
-in `.github/workflows/` as files of their own. Each is a **different subscription**, not a
-bigger pipeline — folding them into `ci.yml` would make it longer without making it
-better.
+A chapter grows into the next one. A **different subscription** does not, so those files
+now live by topic instead:
 
-`08-on-main.yml` is the other half of chapter 01: a pull request and a merge are two
-events, two files and **two different commits**.
+| Was | Now |
+|---|---|
+| `08-on-main.yml` | `../triggers/on-main.yml` — a merge is a different event, a different file, a different commit |
+| `09-from-outside.yml` | `../triggers/from-outside.yml` |
+| `10-message-routes.yml` | `../triggers/message-routes.yml` |
+| `12-docs-pages.yml` | `../triggers/docs-pages.yml` — the other half of chapter 02's `paths:` filter |
+| `11-anchors.yml` · `15-reuse.yml` | `../reuse/` — `_build-and-test.yml` stays in `.github/workflows/`, because a reusable workflow is only callable from there |
+| `13-artifacts.yml` | `../artifacts/what-a-run-leaves.yml` |
+| `14-environments.yml` | `../environments/delivery-pipeline.yml` |
 
-`12-docs-pages.yml` is the other half of chapter 02's `paths:` filter. `ci.yml` takes
-`ci-base-app/**`, the docs workflow takes `docs/**`, and one push matches exactly one of
-them — which is the only arrangement in which a path filter is obviously worth having. It
-is also where `permissions:` stops being ceremony: `pages: write` to deploy, and
-`id-token: write` so the deploy can prove which run it is instead of holding a key.
+`paths:` is only worth teaching as a pair: the finished pipeline takes `ci-base-app/**`,
+`../triggers/docs-pages.yml` takes `docs/**`, and one push matches exactly one of them.
+That file is also where `permissions:` stops being ceremony — `pages: write` to deploy and
+`id-token: write` so the deploy proves which run it is instead of holding a key.

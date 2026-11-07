@@ -147,8 +147,6 @@ jobs:
           tags: ${{ needs.meta.outputs.image }}:${{ needs.meta.outputs.tag }}
           # the label that ties the image to a commit
           labels: org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   smoke:
     needs: [meta, image]
