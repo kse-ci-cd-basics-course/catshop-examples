@@ -1,0 +1,41 @@
+# 03 — an output: one string, and nothing else
+#
+# Same two jobs again. This time what crosses is not a file - it is a value the
+# second job needs in order to know WHAT to do.
+#
+# An image digest, a version number, a computed matrix, a yes/no. If you find
+# yourself base64-ing a file into an output, you wanted 02.
+name: cache-demo-output
+
+on: { workflow_dispatch: }
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    outputs:
+      # the job-level declaration is what makes it readable later. A step output
+      # alone never leaves the job.
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - id: v
+        run: |
+          echo "version=1.4.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "publish=${{ github.ref == 'refs/heads/main' }}" >> "$GITHUB_OUTPUT"
+
+  consume:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "the other job computed ${{ needs.produce.outputs.version }}"
+
+      # and an output can decide whether a job runs at all
+      - if: needs.produce.outputs.publish == 'true'
+        run: echo "this is the branch that publishes"
+
+      # the trap: an output is a STRING. 'false' is a non-empty string, so
+      # `if: needs.produce.outputs.publish` alone is true even when it says false.
+      - run: |
+          echo "compare it, never test it for truthiness:"
+          echo "  needs.produce.outputs.publish == 'true'   <- right"
+          echo "  needs.produce.outputs.publish            <- always true"

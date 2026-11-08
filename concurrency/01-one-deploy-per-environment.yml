@@ -1,0 +1,56 @@
+# concurrency 01 — one deployment per environment
+#
+# THE PAIN
+# Two merges land ninety seconds apart. Both deploy jobs start. The OLDER run
+# happens to finish last, so the older code is what is live — and both runs are
+# green in the Actions tab. Nothing is red, nothing is logged, and the only way
+# anybody finds out is by reading the application.
+#
+# THE GUARD
+# A concurrency group named after the ENVIRONMENT, not after the workflow or the
+# branch. GitHub's own words: "you can use concurrency so that an environment has
+# a maximum of one deployment in progress at a time."
+#
+# cancel-in-progress is FALSE on purpose. A deploy that is half-applied is worse
+# than a deploy that is late, so the second run WAITS instead of killing the first.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: where to deploy
+        type: choice
+        options: [sandbox, integration, stage]
+        default: sandbox
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # a push to main has no inputs, so it falls back to sandbox
+    environment: ${{ inputs.environment || 'sandbox' }}
+
+    # the group is on the JOB, because only this job touches the environment.
+    # the string may read `inputs`, which is what makes it per-environment.
+    concurrency:
+      group: deploy-${{ inputs.environment || 'sandbox' }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # the placeholder deploy. It is honest about being one.
+      - name: deploy
+        run: |
+          echo "deploying ${GITHUB_SHA::7} to ${{ vars.DEPLOY_TARGET }}"
+          echo "this is where a real deploy would run. It takes time, and that"
+          echo "is precisely why two of them must not overlap."
+          sleep 20
+
+      - name: say what is live
+        run: |
+          echo "live on ${{ vars.APP_BASE_URL }}: ${GITHUB_SHA::7}" \
+            >> "$GITHUB_STEP_SUMMARY"

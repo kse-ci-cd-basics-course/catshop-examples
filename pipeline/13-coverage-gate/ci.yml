@@ -1,0 +1,73 @@
+# 13 — the number nobody read
+#
+# The suite has produced a coverage report for three lectures now. It goes into
+# an artifact, the artifact goes into the run, and nobody opens the run. Marsik
+# merged on a check that was SKIPPED rather than passed.
+#
+# This chapter adds the first job in the pipeline that CONSUMES an artifact
+# instead of producing one - and the one you point branch protection at.
+#
+# NEW: download-artifact across a matrix · merge-multiple · a threshold that
+#      fails the job · $GITHUB_STEP_SUMMARY · what branch protection must name
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: ci-base-app/requirements*.txt
+
+      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
+
+      - run: pytest ci-base-app/tests --cov=ci-base-app --cov-report= -q
+
+      # evidence, not an optimisation: the gate below CANNOT run without it,
+      # so it is an artifact and never a cache.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python }}
+          path: .coverage
+          include-hidden-files: true
+          retention-days: 3
+
+  coverage:
+    needs: test
+    # `needs` waits for every matrix row. Without always() this job is skipped
+    # when any row fails - which is correct here: a red suite has no coverage
+    # worth gating on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install coverage
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*        # one per matrix row
+          merge-multiple: true
+
+      - name: combine every row, then hold the line
+        run: |
+          coverage combine .coverage* || coverage combine
+          coverage report --fail-under=80          # THIS is the gate
+          {
+            echo '### coverage'
+            echo '```'
+            coverage report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

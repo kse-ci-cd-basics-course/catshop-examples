@@ -1,0 +1,120 @@
+# by hand: docker push, into GHCR
+#
+# No docker push, no build-push-action. An image in a registry is a few blobs
+# and a JSON manifest, and the whole push is five HTTP calls:
+#
+#   1. GET  /token                          -> a bearer token for THIS repository
+#   2. POST /v2/<name>/blobs/uploads/       -> a session, in the Location header
+#   3. PUT  <location>?digest=sha256:...    -> the blob (once per layer, once for the config)
+#   4. PUT  /v2/<name>/manifests/<tag>      -> the image exists; its digest comes back
+#   5. GET  /v2/<name>/manifests/<digest>   -> read it back, by the name that cannot lie
+#
+# Everything here is signed in with GITHUB_TOKEN, which is why this works at all.
+name: by-hand-registry-push
+
+on: { workflow_dispatch: }
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  push-by-hand:
+    runs-on: ubuntu-latest
+    steps:
+      - name: build the smallest honest image there is
+        run: |
+          # one layer: a tar.gz with a single file in it
+          mkdir -p rootfs/etc && echo "catshop, by hand" > rootfs/etc/motd
+          tar -C rootfs -czf layer.tgz .
+          LAYER_DIGEST="sha256:$(sha256sum layer.tgz | cut -d' ' -f1)"
+          LAYER_SIZE=$(stat -c%s layer.tgz)
+          # the config is JSON, and the DIFF id is the digest of the UNCOMPRESSED tar
+          tar -C rootfs -cf layer.tar .
+          DIFF_ID="sha256:$(sha256sum layer.tar | cut -d' ' -f1)"
+          jq -nc --arg d "$DIFF_ID" --arg rev "$GITHUB_SHA" '{
+            architecture:"amd64", os:"linux",
+            config:{Labels:{"org.opencontainers.image.revision":$rev}},
+            rootfs:{type:"layers", diff_ids:[$d]}
+          }' > config.json
+          CONFIG_DIGEST="sha256:$(sha256sum config.json | cut -d' ' -f1)"
+          CONFIG_SIZE=$(stat -c%s config.json)
+          {
+            echo "LAYER_DIGEST=$LAYER_DIGEST";   echo "LAYER_SIZE=$LAYER_SIZE"
+            echo "CONFIG_DIGEST=$CONFIG_DIGEST"; echo "CONFIG_SIZE=$CONFIG_SIZE"
+          } >> "$GITHUB_ENV"
+
+      - name: 1 - a token for this repository, and nothing else
+        run: |
+          NAME="${GITHUB_REPOSITORY,,}/by-hand"        # a path must be lowercase
+          TOKEN=$(curl -sS -u "$GITHUB_ACTOR:${{ secrets.GITHUB_TOKEN }}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:$NAME:pull,push" | jq -r .token)
+          [ -n "$TOKEN" ] && [ "$TOKEN" != null ] || { echo "::error::no token"; exit 1; }
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          echo "::add-mask::$TOKEN"
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          # note the scope: one repository, two verbs. That string is the whole
+          # permission model, and `permissions: packages: write` is what let us ask.
+
+      - name: 2+3 - upload the two blobs
+        run: |
+          blob() {   # blob <file> <digest>
+            # HEAD first: a blob the registry already has is not uploaded again.
+            if curl -sS -o /dev/null -w '%{http_code}' -I \
+                 -H "Authorization: Bearer $TOKEN" \
+                 "https://ghcr.io/v2/$NAME/blobs/$2" | grep -q 200; then
+              echo "  $2 already there"; return
+            fi
+            LOC=$(curl -sS -D- -o /dev/null -X POST \
+                   -H "Authorization: Bearer $TOKEN" -H "Content-Length: 0" \
+                   "https://ghcr.io/v2/$NAME/blobs/uploads/" \
+                 | awk 'tolower($1)=="location:"{print $2}' | tr -d '\r')
+            case "$LOC" in /*) LOC="https://ghcr.io$LOC" ;; esac
+            # the session URL may already carry a query string, so pick the joiner
+            case "$LOC" in *\?*) SEP="&" ;; *) SEP="?" ;; esac
+            curl -sS -f -X PUT "${LOC}${SEP}digest=$2" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$1" -o /dev/null
+            echo "  uploaded $1 as $2"
+          }
+          blob layer.tgz  "$LAYER_DIGEST"
+          blob config.json "$CONFIG_DIGEST"
+
+      - name: 4 - the manifest, which is what makes it an image
+        run: |
+          jq -nc --arg cd "$CONFIG_DIGEST" --argjson cs "$CONFIG_SIZE" \
+                 --arg ld "$LAYER_DIGEST"  --argjson ls "$LAYER_SIZE" \
+                 --arg rev "$GITHUB_SHA" '{
+            schemaVersion:2,
+            mediaType:"application/vnd.oci.image.manifest.v1+json",
+            config:{mediaType:"application/vnd.oci.image.config.v1+json", digest:$cd, size:$cs},
+            layers:[{mediaType:"application/vnd.oci.image.layer.v1.tar+gzip", digest:$ld, size:$ls}],
+            annotations:{"org.opencontainers.image.revision":$rev}
+          }' > manifest.json
+
+          DIGEST=$(curl -sS -f -D- -o /dev/null -X PUT \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/vnd.oci.image.manifest.v1+json" \
+            --data-binary @manifest.json \
+            "https://ghcr.io/v2/$NAME/manifests/$GITHUB_SHA" \
+            | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tr -d '\r')
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "pushed  ghcr.io/$NAME:$GITHUB_SHA"
+          echo "digest  $DIGEST"
+          # that digest is sha256 of manifest.json. Check it yourself:
+          echo "local   sha256:$(sha256sum manifest.json | cut -d' ' -f1)"
+
+      - name: 5 - read it back by digest
+        run: |
+          curl -sS -f -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+            "https://ghcr.io/v2/$NAME/manifests/$DIGEST" | jq .
+          # A TAG is a key in the registry's own table and can be re-pointed at
+          # another manifest tomorrow. A DIGEST is the content: asking for it
+          # either returns those exact bytes or returns nothing.
+
+      - name: and docker agrees, because it is the same API
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker manifest inspect "ghcr.io/$NAME@$DIGEST" | jq -c '{layers: (.layers|length), config: .config.digest}'

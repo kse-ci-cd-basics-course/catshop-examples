@@ -7,6 +7,16 @@
 #
 # Rule of thumb: repeating steps inside a job → action. Repeating whole jobs
 # across repositories → workflow.
+#
+# Both can live somewhere else, and then you pin a version:
+#
+#   uses: actions/checkout@v4                        an action, by tag
+#   uses: kse/shared/.github/workflows/build.yml@v1  a workflow — the PATH is
+#                                                    part of the name, and the
+#                                                    @ref is not optional
+#
+# `actions/checkout` is a JAVASCRIPT action, not a composite one: the three
+# kinds differ only in what `runs:` says — node20, docker, or composite.
 name: 15 · using both
 
 on: workflow_dispatch
@@ -26,6 +36,9 @@ jobs:
       - run: echo "it reported ${{ steps.suite.outputs.tests }}"
 
   # the reusable workflow. No `steps:`, no `runs-on:` — this job IS the call.
+  # a path means this repository, at this commit. From another repository it
+  # would be  kse/shared/.github/workflows/build.yml@v1  — tagged, so a change
+  # over there cannot alter what runs here until you move the tag.
   with-a-workflow:
     uses: ./.github/workflows/_build-and-test.yml
     with:

@@ -1,0 +1,47 @@
+# 02 — the job can tell it is a retry
+#
+# GITHUB_RUN_ATTEMPT is 1 on a first run and increments every time somebody
+# presses "re-run". That one number is what lets a job behave differently the
+# second time without anybody editing the workflow.
+name: retry-attempt-aware
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  aware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: which attempt is this
+        run: |
+          echo "run    $GITHUB_RUN_ID"
+          echo "number $GITHUB_RUN_NUMBER"
+          echo "attempt $GITHUB_RUN_ATTEMPT"
+          echo "| attempt | $GITHUB_RUN_ATTEMPT |" >> "$GITHUB_STEP_SUMMARY"
+
+      # on a retry, say more. The first run stays quiet and fast.
+      - if: env.GITHUB_RUN_ATTEMPT != '1'
+        run: |
+          echo "this is a re-run - turning the noise up"
+          echo "PYTEST_ADDOPTS=-vv -ra" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ci-base-app/requirements*.txt
+      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
+      - run: pytest ci-base-app/tests -q
+
+      # Two things worth saying out loud when this is on screen:
+      #
+      #   · "Re-run failed jobs" re-runs only what was red, in the SAME run, so
+      #     RUN_ID does not change and RUN_ATTEMPT does. A link to the run still
+      #     works; a link to a log line may not.
+      #   · a re-run is only CHEAP if the cache is still there. The cache was
+      #     saved by the previous attempt's post-step - and only if that job
+      #     succeeded. A job that has never passed has never saved, so every
+      #     retry pays full price.

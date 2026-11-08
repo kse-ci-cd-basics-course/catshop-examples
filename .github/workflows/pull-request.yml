@@ -1,0 +1,62 @@
+# THE PIPELINE — half one: every pull request.
+#
+# This is the finished thing, not a chapter. It is what lab 2 asks for, in the
+# shape the course recommends: test, then build the image to prove it still
+# builds, and run QA. Nothing is published from a pull request.
+#
+# No cache anywhere in here on purpose — add one once you have read
+# ../cache/ and ../pipeline/10-cache-deps.
+name: pull request
+
+on:
+  pull_request:
+    paths:
+      - "ci-base-app/**"
+      - ".github/workflows/pull-request.yml"
+      - ".github/actions/**"
+
+# one run per pull request: a new push cancels the previous run
+concurrency:
+  group: pr-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-and-test
+        with:
+          working-directory: ci-base-app
+
+  image:
+    needs: test                 # a red suite cannot reach the build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          push: false           # a pull request builds and stops
+          load: true
+          tags: catshop:pr-${{ github.event.pull_request.number }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+      - name: it starts, and it answers
+        run: |
+          docker run -d --name pr -p 8080:8080 catshop:pr-${{ github.event.pull_request.number }}
+          for _ in $(seq 30); do curl -fsS localhost:8080/health && break; sleep 1; done
+          curl -fsS localhost:8080/health
+
+  qa:
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/qa
+        with:
+          environment: sandbox
+          host: ${{ vars.APP_HOST }}

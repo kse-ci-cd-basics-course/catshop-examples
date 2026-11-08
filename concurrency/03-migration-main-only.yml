@@ -1,0 +1,52 @@
+# concurrency 03 — the case a concurrency group does NOT fix
+#
+# THE PAIN
+# Barsik opens a pull request. Marsik opens a pull request. Both branches add a
+# migration script. Both pipelines deploy to sandbox to try the change out.
+#
+# Now count the concurrency groups. Barsik's run is `deploy-sandbox`. So is
+# Marsik's — so 01 saves them, one waits for the other. Good.
+#
+# But run them one after the other and the database is still wrong: two different
+# migrations applied in whichever order the queue happened to pick, from two
+# branches that have never been merged, against a schema that now matches NEITHER
+# pull request. The group serialised them. It did not stop them.
+#
+# A concurrency group answers "how many at once?". It cannot answer
+# "who is allowed to do this at all?" — and that is the question here.
+#
+# THE GUARD IS THE TRIGGER, NOT THE GROUP
+# A migration is applied by ONE workflow, which subscribes to one branch and one
+# path. A pull request touching `migrations/**` matches nothing here, so there is
+# no run to queue and nothing to serialise.
+#
+# Two keys, two different questions:
+#   on.push.branches + on.push.paths   ->  WHO may change it
+#   concurrency.group                  ->  HOW MANY at a time
+name: migrate
+
+on:
+  push:
+    branches: [main]            # never from a pull request, never from a branch
+    paths:
+      - 'migrations/**'         # and only when a migration actually changed
+  workflow_dispatch:            # the break-glass route, deliberately manual
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: sandbox
+
+    # the group names the DATABASE. Two migrations must never interleave, and a
+    # cancelled migration is a half-migrated schema — so this one in particular
+    # must queue rather than cancel.
+    concurrency:
+      group: migrate-sandbox-db
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: apply
+        run: |
+          echo "applying migrations/ against the sandbox database"
+          echo "only main reaches this job, and only one of it runs at a time"

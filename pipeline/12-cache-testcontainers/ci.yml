@@ -1,0 +1,88 @@
+# 12 — the cut to the chase
+#
+# One integration test, two runs, two numbers. The test starts Postgres with
+# Testcontainers and WRITES ROWS to it, which is the shape that actually hurts:
+# the image has to be pulled, the app image has to be built, and both of those
+# happen before a single assertion runs.
+#
+# It also makes all four cache-or-artifact decisions in one file:
+#
+#   the Docker LAYERS from previous runs    cache     a cold build is slow, not broken
+#   the IMAGE handed to the test job        artifact  the test cannot run without it
+#   the COVERAGE report                     artifact  something downstream reads it
+#   ~/.cache/pip                            cache     missing costs forty seconds
+#
+# NEW: buildx `outputs: type=docker` · docker save/load across a job boundary
+#      · cache-from/cache-to type=gha · mode=max · CATSHOP_IMAGE
+name: integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build it once, into a file
+        uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          tags: catshop:ci
+          # not a push. A tarball on this machine's disk - which is about to
+          # be deleted, hence the upload below.
+          outputs: type=docker,dest=/tmp/catshop.tar
+          # the LAYER cache. mode=max keeps intermediate stages, which is the
+          # only reason a multi-stage build caches at all.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # the image is a DELIVERABLE for the next job: if it is missing the job
+      # must fail, so it is an artifact and never a cache.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: /tmp/catshop.tar
+          retention-days: 1
+
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip                      # the DEPENDENCY cache, one line
+          cache-dependency-path: ci-base-app/requirements*.txt
+
+      - uses: actions/download-artifact@v4
+        with: { name: image }
+
+      - name: load the image this run already built
+        run: docker load < catshop.tar
+
+      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
+
+      - name: write rows, read them back
+        env:
+          # the test RUNS this tag. It does not build one. If it built its own
+          # image it would rebuild every run and the two numbers below would
+          # come out identical, which is how people conclude caching "does
+          # nothing".
+          CATSHOP_IMAGE: catshop:ci
+        run: pytest ci-base-app/tests/test_integration_db.py -q
+
+      # cold against warm. Paste both into the lab write-up - the grade is on
+      # the minutes saved, not on a cache: key being present.
+      - if: always()
+        run: |
+          {
+            echo '| run | total |'
+            echo '|---|---|'
+            echo "| this one | see the job header |"
+          } >> "$GITHUB_STEP_SUMMARY"

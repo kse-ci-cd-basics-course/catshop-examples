@@ -1,0 +1,103 @@
+# 11 — the second cache, and it cannot help the first
+#
+# Chapter 10 cached the files pip DOWNLOADED. Nothing in it makes a docker build
+# faster: the build runs in a daemon, on its own filesystem, and `pip install`
+# inside a RUN step never sees `~/.cache/pip` on the runner.
+#
+# This is the other cache: the output of each layer, kept between runs.
+#
+# The matrix is the two Dockerfiles from lab 1, side by side, because the
+# difference between them is exactly what mode=max is for.
+#
+# NEW: cache-from/cache-to type=gha · mode=max vs the default min · `scope` so
+#      matrix rows stop overwriting each other · the registry backend · why the
+#      Dockerfile ORDER decides whether any of it helps
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { file: Dockerfile,            scope: single }
+          - { file: Dockerfile.multistage, scope: multi  }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # the layer cache belongs to BUILDKIT, not to the workflow. The classic
+      # docker build has no such thing, so this line is a prerequisite and not
+      # a nicety.
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ci-base-app
+          file: ci-base-app/${{ matrix.file }}
+          tags: catshop:${{ matrix.scope }}
+          push: false                   # this chapter is about the cache, not the registry
+
+          # READ the layers a previous run produced.
+          cache-from: type=gha,scope=${{ matrix.scope }}
+
+          # WRITE them back. Two things to read here:
+          #
+          #   mode=max   the default is `min`, which exports only the layers of
+          #              the FINAL stage. Dockerfile.multistage does its
+          #              expensive work - build-essential, libpq-dev, the venv -
+          #              in the `build` stage, and the final stage only COPYs
+          #              /opt/venv out of it. With mode=min that whole stage is
+          #              not in the cache, so the apt install and the pip
+          #              install run again on every single run.
+          #
+          #   scope      the cache key namespace. Without it both matrix rows
+          #              write to the same scope, each overwrites the other, and
+          #              every run is a cold run while the log cheerfully says
+          #              "exporting cache". One scope per row fixes it.
+          cache-to: type=gha,scope=${{ matrix.scope }},mode=max
+
+      # The same mechanism, other backend. type=gha is the 10 GB repository
+      # store from chapter 10 - same quota, same 7-day eviction, same ref
+      # scoping. type=registry puts the layers in the registry next to the image
+      # instead: no quota, survives longer, needs a login and costs a push.
+      #
+      #   cache-from: type=registry,ref=ghcr.io/owner/catshop:buildcache
+      #   cache-to:   type=registry,ref=ghcr.io/owner/catshop:buildcache,mode=max
+      #
+      # Pick type=gha while the pipeline is the thing you are learning, and
+      # type=registry when the 10 GB starts evicting caches you wanted.
+
+      - name: what the cache actually bought
+        run: |
+          {
+            echo "### ${{ matrix.file }}"
+            echo "Read the build log, not this summary: every step is either"
+            echo '`CACHED` or it ran. The count of CACHED lines is the measurement.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The cache is only half of it. The Dockerfile decides what is cacheable at
+  # all, and lab 1 already asked for this ordering:
+  #
+  #     COPY requirements.txt .          <- changes rarely
+  #     RUN  pip install -r requirements.txt
+  #     COPY app.py .                    <- changes every commit
+  #
+  # Reverse those and every commit invalidates the install layer, because a
+  # layer's key includes every layer above it. Locally that ordering saved a few
+  # seconds. Here it is worth minutes a run, on every run, forever.
+  ordering:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: requirements must be copied before the source, in both files
+        run: |
+          for f in Dockerfile Dockerfile.multistage; do
+            echo "--- $f"
+            grep -n -e '^COPY' -e 'pip install' "ci-base-app/$f"
+          done

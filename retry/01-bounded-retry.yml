@@ -1,0 +1,48 @@
+# 01 — a retry that stops
+#
+# Actions has NO automatic job retry. There is a re-run button a human presses,
+# and there is GITHUB_RUN_ATTEMPT telling a job which attempt it is in. A retry
+# that happens by itself is something you write.
+#
+# The only rule that matters: it must be BOUNDED. An unbounded retry turns a
+# broken dependency into a six-hour job and a bill.
+name: retry-bounded
+
+on: { workflow_dispatch: }
+
+jobs:
+  in-the-step:
+    runs-on: ubuntu-latest
+    steps:
+      - name: three tries, backing off, then fail honestly
+        run: |
+          set -u
+          tries=3
+          for i in $(seq 1 $tries); do
+            echo "::group::attempt $i of $tries"
+            if curl -sfS --max-time 10 https://ghcr.io/v2/ > /dev/null; then
+              echo "ok on attempt $i"; echo "::endgroup::"; exit 0
+            fi
+            echo "failed"; echo "::endgroup::"
+            [ "$i" -lt "$tries" ] && sleep $((i * 5))
+          done
+          echo "::error::still failing after $tries attempts"
+          exit 1
+          # the two things that make this a retry and not a loop: a cap, and a
+          # non-zero exit at the end. A loop that eventually gives up quietly is
+          # how a flaky test becomes a silent one.
+
+  with-a-timeout:
+    runs-on: ubuntu-latest
+    # the other half of bounded. Without it the hosted cap (6 hours) is your
+    # timeout, and you pay for all of it.
+    timeout-minutes: 10
+    steps:
+      - name: a step that may hang, with its own shorter leash
+        timeout-minutes: 2
+        run: curl -sfS --max-time 30 https://ghcr.io/v2/ > /dev/null
+
+  # And the honest note about actions that do this for you
+  # (nick-fields/retry and friends): they are the same loop, with the backoff
+  # and the logging already written. Read the action before you pin it - it
+  # runs your command, so it is exactly as trusted as any other dependency.

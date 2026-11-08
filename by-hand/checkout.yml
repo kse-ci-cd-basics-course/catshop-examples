@@ -1,0 +1,57 @@
+# by hand: actions/checkout
+#
+# The device: every action in this course is a program, and a program you could
+# have written. Run this next to the real thing and the action stops being magic
+# and becomes a shell script somebody else maintains.
+#
+# What checkout actually does: there is no repository on the runner. The machine
+# is a clean box with git and a token. checkout turns that into a working tree
+# at exactly the commit the event named.
+name: by-hand-checkout
+
+on: { workflow_dispatch: }
+
+jobs:
+  the-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git log --oneline -1 && git status --short --branch
+
+  by-hand:
+    runs-on: ubuntu-latest
+    steps:
+      # no checkout step at all. Prove it first.
+      - run: ls -la && echo "--- no .git here:" && ! test -d .git
+
+      - name: clone the one commit this run is about
+        env:
+          # the same token the action uses. It is minted for this run, it is
+          # scoped by `permissions:`, and it dies when the run ends.
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q .
+          # the username is literally x-access-token for an Actions token.
+          git remote add origin \
+            "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # --depth=1 on ONE SHA. The action defaults to this too, which is why
+          # `git log` shows a single commit and `git describe --tags` fails:
+          # there is no history on the machine to search.
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+
+          git log --oneline -1
+
+      # What the action also does, and this script does not:
+      #   · writes the token into .git/config, then REMOVES it in a post-step
+      #     (that is the "Post Run actions/checkout" line in every log)
+      #   · for a pull_request, checks out the MERGE commit refs/pull/N/merge,
+      #     not your branch head - which is why GITHUB_SHA on a PR is a commit
+      #     that exists on no branch
+      #   · handles submodules, lfs, sparse checkout, and persist-credentials
+      - name: the merge ref, which is the part people get wrong
+        run: |
+          echo "ref      $GITHUB_REF"
+          echo "sha      $GITHUB_SHA"
+          echo "head_ref $GITHUB_HEAD_REF"
