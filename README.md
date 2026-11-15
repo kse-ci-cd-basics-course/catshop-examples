@@ -7,9 +7,12 @@
 | `pipeline/` | **the story** — one `ci.yml`, thirteen chapters, each caused by the pain of the one before |
 | `topics/` | **one file per question** — triggers, cache, concurrency, retry, reuse, environments, artifacts |
 | `by-hand/` | the same actions with the action **removed**, written as the HTTP it is |
-| `docs/` | the two pages `topics/triggers-docs-pages.yml` deploys |
 
-Every folder but `.github/` is reading material. **GitHub reads workflows from
+`docs/` is not an example — it is the site GitHub Pages serves, and the only reason it is
+here is that `topics/triggers-docs-pages.yml` subscribes to `docs/**` while the pipeline
+subscribes to `app/**`, so one push matches exactly one of them.
+
+Every folder but `.github/` and `docs/` is reading material. **GitHub reads workflows from
 `.github/workflows/` at the repository root and nowhere else**, so a `ci.yml` anywhere else
 is a text file. To run one, copy it in:
 
