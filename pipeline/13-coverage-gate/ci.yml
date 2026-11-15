@@ -29,11 +29,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: ci-base-app/requirements*.txt
+          cache-dependency-path: app/requirements*.txt
 
-      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
+      - run: pip install -r app/requirements.txt -r app/requirements-dev.txt
 
-      - run: pytest ci-base-app/tests --cov=ci-base-app --cov-report= -q
+      - run: pytest app/tests --cov=app --cov-report= -q
 
       # evidence, not an optimisation: the gate below CANNOT run without it,
       # so it is an artifact and never a cache.

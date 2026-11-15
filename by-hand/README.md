@@ -3,7 +3,7 @@
 Six files, one device: **take an action away and write what it was doing.**
 
 An action is a program somebody else maintains. Nothing in it is privileged, nothing
-in it is magic, and every one of these five turns out to be a shell script with a
+in it is magic, and every one of these six turns out to be a shell script with a
 clear job. The point is not to stop using them — it is that after you have seen the
 script, the action's *failures* read as ordinary failures instead of as weather.
 

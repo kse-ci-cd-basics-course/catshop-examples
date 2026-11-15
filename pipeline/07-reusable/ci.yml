@@ -20,7 +20,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ci-base-app/**'
+      - 'app/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/_build-and-test.yml'
 

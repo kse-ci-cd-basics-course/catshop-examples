@@ -5,13 +5,13 @@
 # builds, and run QA. Nothing is published from a pull request.
 #
 # No cache anywhere in here on purpose — add one once you have read
-# ../cache/ and ../pipeline/10-cache-deps.
+# ../../topics/cache-*.yml and ../../pipeline/10-cache-deps.
 name: pull request
 
 on:
   pull_request:
     paths:
-      - "ci-base-app/**"
+      - "app/**"
       - ".github/workflows/pull-request.yml"
       - ".github/actions/**"
 
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-and-test
         with:
-          working-directory: ci-base-app
+          working-directory: app
 
   image:
     needs: test                 # a red suite cannot reach the build
@@ -40,7 +40,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
+          context: app
           push: false           # a pull request builds and stops
           load: true
           tags: catshop:pr-${{ github.event.pull_request.number }}

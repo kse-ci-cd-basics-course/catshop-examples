@@ -18,9 +18,9 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: ci-base-app/requirements*.txt
+          cache-dependency-path: app/requirements*.txt
 
-      - run: python -m compileall ci-base-app
+      - run: python -m compileall app
 
   test:
     runs-on: *runner          # the same label, written once
@@ -28,6 +28,6 @@ jobs:
       - *checkout             # the same step, written once
       - *python
       - run: pip install -r requirements.txt -r requirements-dev.txt
-        working-directory: ci-base-app
+        working-directory: app
       - run: python -m pytest tests -q
-        working-directory: ci-base-app
+        working-directory: app

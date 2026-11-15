@@ -17,7 +17,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ci-base-app/**'
+      - 'app/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/_build-and-test.yml'
 
@@ -61,7 +61,7 @@ jobs:
         if: always()              # even when the suite above went red
         with:
           name: pytest-output
-          path: ci-base-app/out.txt
+          path: app/out.txt
           retention-days: 3
 
   build:
@@ -72,7 +72,7 @@ jobs:
       #   gh api repos/actions/checkout/git/ref/tags/v4 --jq .object.sha
       - uses: actions/checkout@v4
 
-      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+      - run: docker build -t catshop:${{ github.sha }} app
 
       - name: the image starts, and the app inside it imports
         run: |

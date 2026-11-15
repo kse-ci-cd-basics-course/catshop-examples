@@ -11,4 +11,4 @@ data/
 gotcha.txt
 
 # written by the composite action's test step
-ci-base-app/out.txt
+app/out.txt

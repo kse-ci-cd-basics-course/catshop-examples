@@ -14,7 +14,7 @@ Two things make it measurable:
   between runs on a developer's laptop; on a runner that is deleted when the job
   ends there is nothing to reuse, so switching it on only hides the real number.
 
-    pytest ci-base-app/tests/test_integration_db.py -q
+    pytest app/tests/test_integration_db.py -q
 """
 import os
 

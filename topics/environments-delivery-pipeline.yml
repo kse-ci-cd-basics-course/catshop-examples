@@ -16,7 +16,7 @@
 # because you want `needs.image.outputs...` works, and it adds an edge that
 # jumps over two jobs and turns the graph into a cat's cradle.
 #
-# Environments to create: ENVIRONMENTS.md
+# Environments to create: see ENVIRONMENTS.md beside this file
 name: 14 · delivery
 
 on:
@@ -62,7 +62,7 @@ jobs:
       - id: build
         uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
+          context: app
           push: true
           tags: |
             ${{ steps.pick.outputs.image }}:${{ needs.build.outputs.tag }}

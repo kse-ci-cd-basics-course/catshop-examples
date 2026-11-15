@@ -22,7 +22,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ci-base-app/**'
+      - 'app/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/_build-and-test.yml'
 
@@ -89,7 +89,7 @@ jobs:
         if: always()
         with:
           name: pytest-${{ matrix.python }}
-          path: ci-base-app/out.txt
+          path: app/out.txt
           retention-days: 3
 
   image:
@@ -113,7 +113,7 @@ jobs:
       - id: build
         uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
+          context: app
           push: ${{ needs.meta.outputs.publish == 'yes' }}
           tags: ${{ needs.meta.outputs.image }}:${{ needs.meta.outputs.tag }}
           # the label that ties the image to a commit

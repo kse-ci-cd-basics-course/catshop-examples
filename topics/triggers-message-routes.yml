@@ -35,7 +35,7 @@ jobs:
           fi
 
       - uses: ./.github/actions/install-and-test      # unit tests run either way
-      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+      - run: docker build -t catshop:${{ github.sha }} app
 
   qa-testing:
     needs: build

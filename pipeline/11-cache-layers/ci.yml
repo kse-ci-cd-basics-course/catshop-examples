@@ -38,8 +38,8 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
-          file: ci-base-app/${{ matrix.file }}
+          context: app
+          file: app/${{ matrix.file }}
           tags: catshop:${{ matrix.scope }}
           push: false                   # this chapter is about the cache, not the registry
 
@@ -99,5 +99,5 @@ jobs:
         run: |
           for f in Dockerfile Dockerfile.multistage; do
             echo "--- $f"
-            grep -n -e '^COPY' -e 'pip install' "ci-base-app/$f"
+            grep -n -e '^COPY' -e 'pip install' "app/$f"
           done

@@ -5,14 +5,14 @@
 # published — by DIGEST, so what QA checked is what was shipped.
 #
 # No cache anywhere in here on purpose — add one once you have read
-# ../cache/ and ../pipeline/10-cache-deps.
+# ../../topics/cache-*.yml and ../../pipeline/10-cache-deps.
 name: main
 
 on:
   push:
     branches: [main]
     paths:
-      - "ci-base-app/**"
+      - "app/**"
       - ".github/workflows/main.yml"
       - ".github/actions/**"
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/install-and-test
         with:
-          working-directory: ci-base-app
+          working-directory: app
 
   publish:
     needs: test
@@ -59,7 +59,7 @@ jobs:
       - id: build
         uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
+          context: app
           push: true
           tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}   # never `latest`
           labels: org.opencontainers.image.revision=${{ github.sha }}

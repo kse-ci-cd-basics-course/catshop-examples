@@ -31,7 +31,7 @@ jobs:
       - name: build it once, into a file
         uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
+          context: app
           tags: catshop:ci
           # not a push. A tarball on this machine's disk - which is about to
           # be deleted, hence the upload below.
@@ -58,7 +58,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip                      # the DEPENDENCY cache, one line
-          cache-dependency-path: ci-base-app/requirements*.txt
+          cache-dependency-path: app/requirements*.txt
 
       - uses: actions/download-artifact@v4
         with: { name: image }
@@ -66,7 +66,7 @@ jobs:
       - name: load the image this run already built
         run: docker load < catshop.tar
 
-      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
+      - run: pip install -r app/requirements.txt -r app/requirements-dev.txt
 
       - name: write rows, read them back
         env:
@@ -75,7 +75,7 @@ jobs:
           # come out identical, which is how people conclude caching "does
           # nothing".
           CATSHOP_IMAGE: catshop:ci
-        run: pytest ci-base-app/tests/test_integration_db.py -q
+        run: pytest app/tests/test_integration_db.py -q
 
       # cold against warm. Paste both into the lab write-up - the grade is on
       # the minutes saved, not on a cache: key being present.

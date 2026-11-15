@@ -17,7 +17,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ci-base-app/**'
+      - 'app/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/_build-and-test.yml'
 
@@ -54,10 +54,10 @@ jobs:
           python-version: '3.12'
 
       - run: pip install -r requirements.txt -r requirements-dev.txt
-        working-directory: ci-base-app
+        working-directory: app
 
       - run: python -m pytest tests -q
-        working-directory: ci-base-app
+        working-directory: app
 
   build:
     needs: test           # a broken commit is not worth a docker build
@@ -65,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: docker build -t catshop:${{ github.sha }} ci-base-app
+      - run: docker build -t catshop:${{ github.sha }} app
 
       - name: the image starts, and the app inside it imports
         run: |

@@ -1,6 +1,6 @@
 # The three environments
 
-`environments/delivery-pipeline.yml` reads everything from the environment a job claims, so the deploy steps
+`environments-delivery-pipeline.yml` reads everything from the environment a job claims, so the deploy steps
 are identical for all three. **Settings → Environments → New environment**: `sandbox`, `stage`,
 `production`.
 

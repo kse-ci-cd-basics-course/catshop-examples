@@ -34,8 +34,8 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
-      - run: pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
+          key: pip-${{ runner.os }}-${{ hashFiles('app/requirements*.txt') }}
+      - run: pip download -q -d ~/.cache/pip -r app/requirements.txt
 
   save:
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
         id: id
         run: |
           # the KEY is yours to invent. hashFiles() is this, and nothing more.
-          KEY="by-hand-pip-$RUNNER_OS-$(cat ci-base-app/requirements*.txt | sha256sum | cut -c1-16)"
+          KEY="by-hand-pip-$RUNNER_OS-$(cat app/requirements*.txt | sha256sum | cut -c1-16)"
           # the VERSION is the service's idea of "same shape of cache": the
           # action hashes the path set plus the compression method. Save and
           # restore only have to agree on it.
@@ -62,7 +62,7 @@ jobs:
       - name: fill the directory with something worth caching
         run: |
           mkdir -p ~/.cache/pip
-          pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
+          pip download -q -d ~/.cache/pip -r app/requirements.txt
           du -sh ~/.cache/pip
 
       - name: 2 - tar it, exactly as the action does

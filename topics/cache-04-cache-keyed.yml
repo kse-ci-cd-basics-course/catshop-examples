@@ -18,10 +18,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
+          key: pip-${{ runner.os }}-${{ hashFiles('app/requirements*.txt') }}
           restore-keys: pip-${{ runner.os }}-
 
-      - run: pip download -q -d ~/.cache/pip -r ci-base-app/requirements.txt
+      - run: pip download -q -d ~/.cache/pip -r app/requirements.txt
       - run: echo "exact hit on the way in = ${{ steps.c.outputs.cache-hit }}"
       # the SAVE is not here. It is a post-step: it runs after the last step of
       # this job, and only if the job succeeded. A job that keeps failing never
@@ -38,14 +38,14 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('ci-base-app/requirements*.txt') }}
+          key: pip-${{ runner.os }}-${{ hashFiles('app/requirements*.txt') }}
           restore-keys: pip-${{ runner.os }}-
 
       - name: the job works either way - that is the test
         run: |
           echo "hit = ${{ steps.c.outputs.cache-hit }}"
           ls ~/.cache/pip 2>/dev/null | head -5 || echo "cold. carrying on anyway"
-          pip install -r ci-base-app/requirements.txt    # slower when cold, still correct
+          pip install -r app/requirements.txt    # slower when cold, still correct
 
   # Two facts that decide where a cache can be read from, and they are not about
   # your workflow at all:

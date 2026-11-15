@@ -1,19 +1,11 @@
-# Concurrency — one use case per file
+# Concurrency — the four cases in full
 
 GitHub's default is **run as much as possible, all at once**, and it has been doing you a
 favour in every chapter so far. It stops being a favour the moment two runs touch **the
 same thing**.
 
-These are not chapters: nothing here grows into the next file. Each one is a different
-answer to a different question, and the last one is the case where a concurrency group is
-**not the answer at all**.
+Four cases, and the last one is where a concurrency group is **not the answer at all**.
 
-| | File | What is shared | Cancel? |
-|---|---|---|---|
-| 01 | `01-one-deploy-per-environment.yml` | one **environment** | no — queue |
-| 02 | `02-one-suite-per-dataset.yml` | one **dataset** | no — queue |
-| 03 | `03-migration-main-only.yml` | one **database schema** — and the group is not enough | no — queue, *and* filter the trigger |
-| 03b | `03b-migration-check-on-pr.yml` | nothing | **yes** — cancel freely |
 
 ---
 

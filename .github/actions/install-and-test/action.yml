@@ -11,7 +11,7 @@ inputs:
   working-directory:
     description: the folder holding requirements.txt and tests/
     required: false
-    default: ci-base-app
+    default: app
 
 outputs:
   tests:

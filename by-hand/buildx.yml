@@ -42,8 +42,8 @@ jobs:
 
       - name: build, exporting the layers
         run: |
-          docker buildx build ci-base-app \
-            --file ci-base-app/Dockerfile \
+          docker buildx build app \
+            --file app/Dockerfile \
             --tag catshop:by-hand \
             --cache-from type=gha,scope=by-hand \
             --cache-to   type=gha,scope=by-hand,mode=max \
@@ -63,7 +63,7 @@ jobs:
 
       - name: run it twice and count what was reused
         run: |
-          docker buildx build ci-base-app --file ci-base-app/Dockerfile \
+          docker buildx build app --file app/Dockerfile \
             --cache-from type=gha,scope=by-hand --tag catshop:again --load 2>&1 \
             | tee /tmp/second.log | tail -20
           echo "CACHED steps: $(grep -c 'CACHED' /tmp/second.log)"
@@ -79,8 +79,8 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           NAME="${GITHUB_REPOSITORY,,}/catshop"
           echo "NAME=$NAME" >> "$GITHUB_ENV"
-          docker buildx build ci-base-app \
-            --file ci-base-app/Dockerfile \
+          docker buildx build app \
+            --file app/Dockerfile \
             --cache-from "type=registry,ref=ghcr.io/$NAME:buildcache" \
             --cache-to   "type=registry,ref=ghcr.io/$NAME:buildcache,mode=max" \
             --tag "ghcr.io/$NAME:${GITHUB_SHA}" --push

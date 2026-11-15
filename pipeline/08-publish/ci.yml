@@ -29,8 +29,8 @@ jobs:
           python-version: '3.12'
       # no cache anywhere in this chapter, on purpose: every run downloads the
       # same packages again. Time it, and keep the number for chapter 10.
-      - run: pip install -r ci-base-app/requirements.txt -r ci-base-app/requirements-dev.txt
-      - run: pytest ci-base-app/tests -q
+      - run: pip install -r app/requirements.txt -r app/requirements-dev.txt
+      - run: pytest app/tests -q
 
   image:
     needs: test
@@ -67,7 +67,7 @@ jobs:
       - id: build
         uses: docker/build-push-action@v6
         with:
-          context: ci-base-app
+          context: app
           push: ${{ steps.meta.outputs.publish }}     # a pull request builds and stops
           tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}
           # the label that ties these bytes to that commit. The grader checks it,
