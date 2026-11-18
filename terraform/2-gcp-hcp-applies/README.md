@@ -41,6 +41,60 @@ Open a pull request that touches this folder and HCP plans it by itself — a ch
 the pull request with the plan behind it, no YAML involved. Merge, and it applies, with the
 run, the diff and whoever approved it in the workspace's history.
 
+## It watches the repository, not your pipeline
+
+This is the part worth getting straight, because the name "VCS integration" makes it sound
+like a stage that comes after CI. It is not.
+
+HCP becomes a **second, independent consumer of the same commit**. It sits beside the
+pipeline, not after it:
+
+```
+            ┌─▶ GitHub Actions   test ─> build ─> publish ─> qa ─> deploy
+a merge ────┤
+            └─▶ HCP              plan ─> apply
+```
+
+So on a merge it applies, and it does not know:
+
+- whether the test suite passed
+- whether the image was built, or published, or ever existed
+- whether QA ran at all
+
+**It will apply a commit your tests rejected.** `../../.github/workflows/main.yml` deploys
+behind `needs: [publish, qa]`; there is no equivalent here without abandoning VCS mode and
+driving it from the API instead — at which point you are writing a pipeline again.
+
+That is the real argument against this mode for deploying a *service*. It is a much better
+fit for infrastructure that has no test suite in front of it.
+
+## So why have it at all
+
+Strip the product page and the free tier gives you exactly one thing you cannot trivially do
+yourself: **managed state with a lock, without owning a bucket.**
+
+Everything else duplicates something you already have:
+
+| | here | what you already use |
+|---|---|---|
+| state and the lock | the workspace | a GCS or S3 bucket, a few cents a month |
+| who applied what, and when | the workspace's run history | the Actions run log and its summary |
+| approval before apply | the workspace | `environment:` with a required reviewer |
+| variables and secrets | the workspace | repository variables and secrets |
+| policy enforcement | Sentinel / OPA — **paid** | — |
+| scheduled drift detection | **paid** | a scheduled workflow you write |
+
+Which decides where it earns its place:
+
+- **`../1-the-minimum`** — load-bearing. There is no cloud account there, so there is **no
+  bucket to put state in**. Without it the state dies with the runner and `No changes.`
+  becomes a sentence that can never be true.
+- **here and `../3-gcp-github-oidc`** — a preference. You already have a project, so a state
+  bucket is three `gcloud` commands.
+
+**Managed state is how you get a backend when you have nowhere to put one.** Once you have a
+cloud account, a bucket does the same job and your pipeline already does the rest.
+
 ## The two things that bite
 
 **Remote execution has no Docker daemon.** It is why `../1-the-minimum` cannot be run this

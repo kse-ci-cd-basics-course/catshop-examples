@@ -20,6 +20,26 @@ Two variations sit under model 1, because its pipeline is where the pipeline ide
 | `1a-plan-on-pr-apply-on-main` | the apply ran on a push nobody read | `-out=tfplan`, the plan posted as a comment, applied from those bytes behind an environment gate |
 | `1b-checks-before-the-plan` | the plan was correct and the file was still wrong | a branch off `1a` — `fmt`, `validate`, `tflint`, `terraform test` |
 
+## What you own, and what you rent
+
+Every model is the same four questions with different answers, and each answer is something
+you either run yourself or pay somebody to run.
+
+| | state and its lock | who runs `apply` | the credential to the cloud | what is in the repository |
+|---|---|---|---|---|
+| **1** | rented — HCP | yours — a runner | none; it is a local socket | a token |
+| **2** | rented — HCP | **rented — HCP** | held by HCP | nothing |
+| **3** | **yours — a bucket** | yours — a runner | minted per run, by OIDC | nothing |
+
+Renting the state is the one that is genuinely hard to avoid in model 1: with no cloud
+account there is no bucket, so the state would die with the runner. By model 3 you own a
+project, a bucket costs cents, and the rented version is a preference.
+
+Renting the **execution** is the one with a hidden cost. A service that HCP deploys is
+deployed on the commit, in parallel with your pipeline — so it applies whether or not your
+tests passed. `2-gcp-hcp-applies/README.md` has the detail; it is the strongest reason the
+taught default is model 3.
+
 ## The stack never changes
 
 ```bash
