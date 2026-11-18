@@ -93,82 +93,13 @@ jobs:
 
   # ── deploy ──────────────────────────────────────────────────────────────────
   #
-  # The digest QA just checked is the digest that gets deployed. Not the tag it
-  # was pushed under, and not a fresh build: the same bytes, all the way down.
-  #
-  # Nothing is stored for this. The job asks GitHub for a short-lived token,
-  # Google trades it for an hour of credentials, and the run ends with no
-  # credential anywhere. See ../../terraform/3-gcp-github-oidc/README.md for the one-time
-  # trust setup — and for why the attribute condition on it is not optional.
+  # The digest QA just checked is the digest deployed — not the tag it was
+  # pushed under, and not a fresh build. Automatic here: the merge was the
+  # decision, and `production` still holds it for a reviewer.
   deploy:
     needs: [publish, qa]
-    runs-on: ubuntu-latest
-    environment: production     # a person opens this gate
-    defaults:
-      run:
-        working-directory: terraform/3-gcp-github-oidc
-    env:
-      TF_IN_AUTOMATION: "1"
-      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
-      # The image is passed IN, never looked up. A lookup is a question asked
-      # at plan time whose answer can change before apply.
-      TF_VAR_image: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.9.8"
-          terraform_wrapper: false
-
-      - run: terraform init -input=false
-      - run: terraform plan -input=false -no-color -out=tfplan
-
-      - name: the plan, in the run summary
-        run: |
-          counts=$(terraform show -json tfplan | python3 -c "
-          import json, sys
-          c = {'create': 0, 'update': 0, 'delete': 0}
-          for r in json.load(sys.stdin).get('resource_changes', []):
-              for a in r['change']['actions']:
-                  if a in c:
-                      c[a] += 1
-          print('%d to add, %d to change, %d to destroy' % (c['create'], c['update'], c['delete']))
-          ")
-
-          {
-            echo "## terraform plan"
-            echo
-            echo "**$counts**"
-            echo
-            echo '<details><summary>the whole plan</summary>'
-            echo
-            echo '```hcl'
-            terraform show -no-color tfplan | head -c 900000
-            echo '```'
-            echo
-            echo '</details>'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # On main this is automatic: the merge was the decision. A pull request
-      # has to be approved in the Actions tab instead — see pull-request.yml.
-      - run: terraform apply -input=false tfplan
-
-      - name: it answers on the public address
-        run: |
-          url="$(terraform output -raw url)"
-          echo "- deployed to $url" >> "$GITHUB_STEP_SUMMARY"
-          # The backends are unhealthy until the instances have pulled the
-          # image and /health has replied twice, so this waits rather than
-          # declaring failure on the first 502.
-          for _ in $(seq 1 60); do
-            curl -fsS -m 5 "$url/health" && break
-            sleep 10
-          done
-          curl -fsS -m 5 "$url/health"
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      apply: true
+      environment: production
+      image: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}

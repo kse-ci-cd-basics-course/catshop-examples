@@ -1,0 +1,49 @@
+# Deploy a branch, on purpose, by hand.
+#
+# ONE trigger, and it is `workflow_dispatch`. No push, no pull_request, no
+# schedule — so no sequence of events can apply anything here without somebody
+# choosing to. A pull request plans and stops; this is the only way a branch
+# reaches the cloud.
+#
+# Deliberately not a job inside pull-request.yml: a job that merely WAITS for
+# approval is still a job that started automatically, and an environment with
+# no reviewers configured lets it straight through.
+name: deploy a branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to deploy"
+        required: true
+        type: string
+      destroy:
+        description: "Tear this branch's stack down instead"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+# One at a time per branch, and never cancelled half way: an interrupted apply
+# leaves the state describing a world that is gone.
+concurrency:
+  group: deploy-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      ref: ${{ inputs.ref }}
+      apply: true
+      destroy: ${{ inputs.destroy }}
+      environment: pr-deploy
+      # Its own state, under its own prefix in the same bucket. Without this a
+      # branch would write over production's state, and the next apply on main
+      # would reconcile the world back from a branch's idea of it. `prefix` is
+      # left out of backend.tf precisely so it can be supplied here — that is
+      # what partial backend configuration is for.
+      state-prefix: catshop/branches/${{ inputs.ref }}
+      name-prefix: catshop-branch

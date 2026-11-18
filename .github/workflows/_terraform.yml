@@ -1,0 +1,212 @@
+# ONE definition of "plan this, and maybe apply it", called from three places.
+#
+# It lives here because a reusable workflow is only callable from
+# .github/workflows/ — and nothing triggers it, because `workflow_call` is its
+# only event. Same rule as _build-and-test.yml.
+#
+# The three callers differ only in their arguments:
+#
+#   pull-request.yml   apply: false                      plan and stop
+#   main.yml           apply: true                       the merge decided it
+#   deploy-branch.yml  apply: true, its own state prefix  a person decided it
+name: _terraform
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "What to check out. Defaults to whatever the caller is on."
+        type: string
+        required: false
+        default: ""
+      working-directory:
+        type: string
+        required: false
+        default: terraform/3-gcp-github-oidc
+      apply:
+        description: "false plans and stops. true applies the plan it just made."
+        type: boolean
+        required: false
+        default: false
+      destroy:
+        type: boolean
+        required: false
+        default: false
+      state-prefix:
+        description: >-
+          Partial backend configuration. Empty uses the prefix in backend.tf,
+          which is production. A branch passes its own so it cannot write over it.
+        type: string
+        required: false
+        default: ""
+      name-prefix:
+        description: "TF_VAR_name, so two stacks can exist in one project."
+        type: string
+        required: false
+        default: catshop
+      image:
+        description: >-
+          The image to deploy, as a DIGEST. Passed in rather than looked up: a
+          lookup is a question asked at plan time whose answer can change before
+          apply. Empty leaves the default in variables.tf.
+        type: string
+        required: false
+        default: ""
+      environment:
+        description: "Required when apply is true. The gate the apply sits behind."
+        type: string
+        required: false
+        default: ""
+    outputs:
+      url:
+        description: "Where the stack answers, when something was applied."
+        value: ${{ jobs.apply.outputs.url }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_name: ${{ inputs.name-prefix }}
+      TF_VAR_image: ${{ inputs.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          # The wrapper normalises exit codes, and these steps read them.
+          terraform_wrapper: false
+
+      # Cheapest first: formatting cannot fail interestingly.
+      - run: terraform fmt -check -recursive -diff
+
+      - name: init
+        run: |
+          if [ -n "${{ inputs.state-prefix }}" ]; then
+            terraform init -input=false \
+              -backend-config="prefix=${{ inputs.state-prefix }}"
+          else
+            terraform init -input=false
+          fi
+
+      - run: terraform validate
+
+      - name: plan
+        run: |
+          if [ "${{ inputs.destroy }}" = "true" ]; then
+            terraform plan -destroy -input=false -no-color -out=tfplan
+          else
+            terraform plan -input=false -no-color -out=tfplan
+          fi
+
+      # A summary belongs to the run that produced it and cannot drift from it,
+      # which a comment on a pull request can.
+      - name: the plan, in the run summary
+        run: |
+          counts=$(terraform show -json tfplan | python3 -c "
+          import json, sys
+          c = {'create': 0, 'update': 0, 'delete': 0}
+          for r in json.load(sys.stdin).get('resource_changes', []):
+              for a in r['change']['actions']:
+                  if a in c:
+                      c[a] += 1
+          print('%d to add, %d to change, %d to destroy' % (c['create'], c['update'], c['delete']))
+          ")
+
+          {
+            echo "## terraform plan"
+            echo
+            echo "**$counts**"
+            echo
+            echo '<details><summary>the whole plan</summary>'
+            echo
+            echo '```hcl'
+            terraform show -no-color tfplan | head -c 900000
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The plan travels as bytes. Re-planning in the apply job would apply
+      # something nobody read.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ inputs.working-directory }}/tfplan
+          retention-days: 5
+
+  apply:
+    needs: plan
+    if: ${{ inputs.apply }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_name: ${{ inputs.name-prefix }}
+      TF_VAR_image: ${{ inputs.image }}
+    outputs:
+      url: ${{ steps.out.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ inputs.working-directory }}
+
+      # A different machine with an empty folder: the plan file travelled, the
+      # .terraform directory did not.
+      - name: init
+        run: |
+          if [ -n "${{ inputs.state-prefix }}" ]; then
+            terraform init -input=false \
+              -backend-config="prefix=${{ inputs.state-prefix }}"
+          else
+            terraform init -input=false
+          fi
+
+      # No -auto-approve and no configuration argument. A saved plan is already
+      # approved — that is what saving it meant.
+      - run: terraform apply -input=false tfplan
+
+      - name: where it landed
+        id: out
+        if: ${{ !inputs.destroy }}
+        run: |
+          url="$(terraform output -raw url)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "- deployed to $url" >> "$GITHUB_STEP_SUMMARY"
