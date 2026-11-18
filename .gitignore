@@ -12,3 +12,11 @@ gotcha.txt
 
 # written by the composite action's test step
 app/out.txt
+
+# Terraform: providers are downloaded, state is a secret, plans are artifacts
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+plan.txt
+crash.log

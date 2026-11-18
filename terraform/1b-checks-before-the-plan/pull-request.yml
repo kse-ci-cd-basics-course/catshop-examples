@@ -1,16 +1,16 @@
-# A BRANCH off ../2-plan-on-pr-apply-on-main — the same pipeline with the checks
+# A BRANCH off ../1a-plan-on-pr-apply-on-main — the same pipeline with the checks
 # that belong in front of `plan`. Read that one first; this is not the next step,
 # it is that step with three more rungs on the ladder.
 #
 # The diff against 2/pull-request.yml is the whole lesson: fmt, validate,
 # tflint, test — cheapest first, and each one catches something the one before
 # it cannot see.
-name: terraform-2a-pull-request
+name: terraform-model1b-pull-request
 
 on:
   pull_request:
     paths:
-      - "terraform/2a-checks-before-the-plan/**"
+      - "terraform/1b-checks-before-the-plan/**"
       - "app/**"
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: terraform/2a-checks-before-the-plan
+        working-directory: terraform/1b-checks-before-the-plan
 
     env:
       TF_IN_AUTOMATION: "1"
@@ -83,8 +83,8 @@ jobs:
         with:
           name: tfplan
           path: |
-            terraform/2a-checks-before-the-plan/tfplan
-            terraform/2a-checks-before-the-plan/plan.txt
+            terraform/1b-checks-before-the-plan/tfplan
+            terraform/1b-checks-before-the-plan/plan.txt
           retention-days: 5
 
       # The review artifact becomes the review. Nobody opens an artifact; a
@@ -94,7 +94,7 @@ jobs:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync(
-              'terraform/2a-checks-before-the-plan/plan.txt', 'utf8');
+              'terraform/1b-checks-before-the-plan/plan.txt', 'utf8');
             const clipped = body.length > 60000
               ? body.slice(0, 60000) + '\n...truncated, read the artifact'
               : body;

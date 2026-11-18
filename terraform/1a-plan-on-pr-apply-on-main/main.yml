@@ -3,13 +3,13 @@
 # Two jobs, and an artifact between them. The apply job never runs `plan`: it
 # consumes the saved file, so the bytes that were reviewed are the bytes that
 # change the world.
-name: terraform-2-main
+name: terraform-model1a-main
 
 on:
   push:
     branches: [main]
     paths:
-      - "terraform/2-plan-on-pr-apply-on-main/**"
+      - "terraform/1a-plan-on-pr-apply-on-main/**"
       - "app/**"
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: terraform/2-plan-on-pr-apply-on-main
+        working-directory: terraform/1a-plan-on-pr-apply-on-main
     env:
       TF_IN_AUTOMATION: "1"
       # The only secret in this pipeline. It reaches one workspace and has no
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: tfplan-main
-          path: terraform/2-plan-on-pr-apply-on-main/tfplan
+          path: terraform/1a-plan-on-pr-apply-on-main/tfplan
           retention-days: 5
 
   apply:
@@ -60,7 +60,7 @@ jobs:
     environment: production
     defaults:
       run:
-        working-directory: terraform/2-plan-on-pr-apply-on-main
+        working-directory: terraform/1a-plan-on-pr-apply-on-main
     env:
       TF_IN_AUTOMATION: "1"
       # The only secret in this pipeline. It reaches one workspace and has no
@@ -79,7 +79,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tfplan-main
-          path: terraform/2-plan-on-pr-apply-on-main
+          path: terraform/1a-plan-on-pr-apply-on-main
 
       # init again: this is a different machine with an empty folder. The plan
       # file travelled; the .terraform directory did not, and a saved plan is

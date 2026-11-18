@@ -69,4 +69,4 @@ leaves the state describing a world that no longer exists.
 ## What is still wrong with this step
 
 It applies straight from a push. Nobody reviewed anything, and the plan was never seen by a
-person before it changed the world. That is `../2-plan-on-pr-apply-on-main`.
+person before it changed the world. That is `../1a-plan-on-pr-apply-on-main`.

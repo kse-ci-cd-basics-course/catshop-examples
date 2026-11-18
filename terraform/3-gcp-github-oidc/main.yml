@@ -1,10 +1,10 @@
 # On main: the plan that was reviewed is the plan that is applied.
-name: terraform-gcp-main
+name: terraform-model3-gcp-main
 
 on:
   push:
     branches: [main]
-    paths: ["terraform/3-gcp/**"]
+    paths: ["terraform/3-gcp-github-oidc/**"]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 # The bucket holds one lock for this prefix. Two applies cannot race; this makes
 # the second RUN wait rather than queue against a lock it will time out on.
 concurrency:
-  group: terraform-gcp-apply
+  group: terraform-model3-gcp-apply
   cancel-in-progress: false
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: terraform/3-gcp
+        working-directory: terraform/3-gcp-github-oidc
     env:
       TF_IN_AUTOMATION: "1"
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: tfplan-gcp-main
-          path: terraform/3-gcp/tfplan
+          path: terraform/3-gcp-github-oidc/tfplan
           retention-days: 5
 
   apply:
@@ -52,7 +52,7 @@ jobs:
     environment: production
     defaults:
       run:
-        working-directory: terraform/3-gcp
+        working-directory: terraform/3-gcp-github-oidc
     env:
       TF_IN_AUTOMATION: "1"
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tfplan-gcp-main
-          path: terraform/3-gcp
+          path: terraform/3-gcp-github-oidc
       # A different machine with an empty folder: the plan file travelled, the
       # .terraform directory did not.
       - run: terraform init -input=false

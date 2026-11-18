@@ -3,11 +3,11 @@
 # The job mints a short-lived token from GitHub, hands it to Google, and gets
 # back credentials for a service account. Nothing is stored. There is no secret
 # in this repository to leak, rotate or forget about.
-name: terraform-gcp-pull-request
+name: terraform-model3-gcp-pull-request
 
 on:
   pull_request:
-    paths: ["terraform/3-gcp/**"]
+    paths: ["terraform/3-gcp-github-oidc/**"]
 
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: terraform/3-gcp
+        working-directory: terraform/3-gcp-github-oidc
     env:
       TF_IN_AUTOMATION: "1"
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
@@ -55,14 +55,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: tfplan-gcp
-          path: terraform/3-gcp/tfplan
+          path: terraform/3-gcp-github-oidc/tfplan
           retention-days: 5
 
       - uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('terraform/3-gcp/plan.txt', 'utf8');
+            const body = fs.readFileSync('terraform/3-gcp-github-oidc/plan.txt', 'utf8');
             const clipped = body.length > 60000
               ? body.slice(0, 60000) + '\n...truncated, read the artifact'
               : body;

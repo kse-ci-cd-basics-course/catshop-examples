@@ -3,12 +3,12 @@
 #
 # The diff against the pipeline in ../1-the-minimum is the whole lesson: one job
 # that applied became a job that only proposes, and the proposal is an artifact.
-name: terraform-2-pull-request
+name: terraform-model1a-pull-request
 
 on:
   pull_request:
     paths:
-      - "terraform/2-plan-on-pr-apply-on-main/**"
+      - "terraform/1a-plan-on-pr-apply-on-main/**"
       - "app/**"
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: terraform/2-plan-on-pr-apply-on-main
+        working-directory: terraform/1a-plan-on-pr-apply-on-main
 
     env:
       TF_IN_AUTOMATION: "1"
@@ -67,8 +67,8 @@ jobs:
         with:
           name: tfplan
           path: |
-            terraform/2-plan-on-pr-apply-on-main/tfplan
-            terraform/2-plan-on-pr-apply-on-main/plan.txt
+            terraform/1a-plan-on-pr-apply-on-main/tfplan
+            terraform/1a-plan-on-pr-apply-on-main/plan.txt
           retention-days: 5
 
       # The review artifact becomes the review. Nobody opens an artifact; a
@@ -78,7 +78,7 @@ jobs:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync(
-              'terraform/2-plan-on-pr-apply-on-main/plan.txt', 'utf8');
+              'terraform/1a-plan-on-pr-apply-on-main/plan.txt', 'utf8');
             const clipped = body.length > 60000
               ? body.slice(0, 60000) + '\n...truncated, read the artifact'
               : body;

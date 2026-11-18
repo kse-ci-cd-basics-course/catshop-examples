@@ -1,10 +1,10 @@
 # 2a · The checks in front of the plan
 
-**This is a branch, not the next step.** It is `../2-plan-on-pr-apply-on-main` with three
+**This is a branch, not the next step.** It is `../1a-plan-on-pr-apply-on-main` with three
 more rungs on the ladder. Read that one first.
 
 ```bash
-diff ../2-plan-on-pr-apply-on-main/pull-request.yml pull-request.yml
+diff ../1a-plan-on-pr-apply-on-main/pull-request.yml pull-request.yml
 ```
 
 **Files added:** `.tflint.hcl` · `stack.tftest.hcl`

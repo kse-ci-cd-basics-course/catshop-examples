@@ -14,7 +14,7 @@ on:
     branches: [main]
     paths:
       - "app/**"
-      - "terraform/3-gcp/**"
+      - "terraform/3-gcp-github-oidc/**"
       - ".github/workflows/main.yml"
       - ".github/actions/**"
   workflow_dispatch:
@@ -98,7 +98,7 @@ jobs:
   #
   # Nothing is stored for this. The job asks GitHub for a short-lived token,
   # Google trades it for an hour of credentials, and the run ends with no
-  # credential anywhere. See ../../terraform/3-gcp/README.md for the one-time
+  # credential anywhere. See ../../terraform/3-gcp-github-oidc/README.md for the one-time
   # trust setup — and for why the attribute condition on it is not optional.
   deploy:
     needs: [publish, qa]
@@ -106,7 +106,7 @@ jobs:
     environment: production     # a person opens this gate
     defaults:
       run:
-        working-directory: terraform/3-gcp
+        working-directory: terraform/3-gcp-github-oidc
     env:
       TF_IN_AUTOMATION: "1"
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
