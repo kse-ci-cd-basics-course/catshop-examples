@@ -1,6 +1,6 @@
 # Deploying it, declared
 
-Four steps. The **stack is byte-identical in all of them** — `md5 */main.tf` proves it — so
+Five steps. The **stack is byte-identical in all of them** — `md5 */main.tf` proves it — so
 every diff between two steps is a diff in the *pipeline*, never in the thing being deployed.
 
 ```bash
@@ -15,6 +15,7 @@ diff 2-plan-on-pr-apply-on-main/pull-request.yml 2a-checks-before-the-plan/pull-
 | 2 | `2-plan-on-pr-apply-on-main` | the apply ran on a push nobody read | **plan on the pull request, apply on main** — `-out=tfplan`, the plan as a comment and an artifact, an environment gate, a concurrency group |
 | 2a | `2a-checks-before-the-plan` | the plan was correct and the file was still wrong | **the ladder in front of plan** — `fmt`, `validate`, `tflint`, `terraform test` |
 | 3 | `3-gcp` | it all deploys to a daemon on your own machine | **the same architecture on a real cloud** — a VPC and its firewall rules, a managed instance group, Cloud SQL on a private address, state in a bucket, and a pipeline that stores no key at all |
+| 4 | `4-aws` | one cloud's vocabulary looks like the only way to say it | **the same file on AWS**, read side by side — regional VPCs and zonal subnets, three load-balancer objects instead of five, and the same OIDC trust written as a role |
 
 **`2a` is a branch, not the next step.** It is `2-plan-on-pr-apply-on-main` with three more rungs.
 
