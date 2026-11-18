@@ -1,0 +1,98 @@
+# The stack, applied by a pipeline instead of by you.
+#
+# The only idea here that is not in the .tf files is where the state lives. A
+# runner is destroyed when the job ends, so `cloud.tf` keeps the state somewhere
+# that outlives it — and that is what makes the second run say "No changes."
+name: terraform-1-minimum
+
+on:
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: "Tear the stack down at the end of this run"
+        type: boolean
+        default: false
+  push:
+    paths:
+      - "terraform/1-the-minimum/**"
+      - "app/**"
+
+permissions:
+  contents: read
+
+# Terraform locks the state for the length of an apply. Now that the state is
+# shared, two runs can really collide — so the second one waits instead of
+# failing on a lock it would never get. Never cancel-in-progress on an apply:
+# a half-finished apply is how state and reality stop agreeing.
+concurrency:
+  group: terraform-1-minimum
+  cancel-in-progress: false
+
+jobs:
+  stack:
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: terraform/1-the-minimum
+
+    env:
+      TF_IN_AUTOMATION: "1"
+      # The only secret in this pipeline. It reaches one workspace and has no
+      # billing attached to it.
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      TF_VAR_docker_host: unix:///var/run/docker.sock
+      TF_VAR_port: "8080"
+      TF_VAR_name: catshop-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # init now talks to the state service. Without the token it stops here,
+      # and the message is about authentication rather than about Terraform.
+      - run: terraform init -input=false
+      - run: terraform validate
+
+      # Run this workflow twice and read these two lines. The first says
+      # everything is new; the second says nothing is. That sentence is the
+      # entire reason the state is not on this machine.
+      - run: terraform plan -input=false -no-color
+
+      - run: terraform apply -auto-approve -input=false
+
+      - name: it answers, and more than one copy is answering
+        run: |
+          url="$(terraform output -raw url)"
+
+          for _ in $(seq 1 60); do
+            curl -sf -m 2 "$url/health" >/dev/null && break
+            sleep 1
+          done
+
+          # Wait for the POOL, not just the proxy. A backend that was slow to
+          # start has already failed once, and nginx will not send it traffic
+          # again until fail_timeout passes — measured here at about 30s.
+          for _ in $(seq 1 12); do
+            seen=$(for _ in $(seq 1 12); do
+                     curl -s -o /dev/null -D - -H 'Connection: close' "$url/health" \
+                       | tr -d '\r' | awk 'tolower($1)=="x-served-by:"{print $2}'
+                   done | sort -u)
+            [ "$(printf '%s\n' "$seen" | grep -c .)" -ge 2 ] && break
+            sleep 5
+          done
+
+          echo "backends that answered:"
+          printf '%s\n' "$seen"
+          [ "$(printf '%s\n' "$seen" | grep -c .)" -ge 2 ] \
+            || { echo "only one replica ever answered"; exit 1; }
+
+      # NOT always(). The state is real now, so leaving the stack up between
+      # runs is a legitimate thing to do — and it is what makes the next run's
+      # "No changes." mean something. Destroy on purpose, not on every exit.
+      - if: ${{ inputs.destroy || false }}
+        run: terraform destroy -auto-approve -input=false

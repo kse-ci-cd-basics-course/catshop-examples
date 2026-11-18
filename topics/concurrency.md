@@ -150,8 +150,8 @@ queue them all and cancel them. The queue is FIFO by the time a run **started wa
 not by when it was dispatched.
 
 **The group is a string nothing validates.** A typo gives you a group of one, silently,
-which looks exactly like a working configuration. It is the third such string in this
-course, after a cache key and an OIDC subject.
+which looks exactly like a working configuration. Cache keys and OIDC
+subjects have exactly the same property.
 
 ## The idiom, and why
 

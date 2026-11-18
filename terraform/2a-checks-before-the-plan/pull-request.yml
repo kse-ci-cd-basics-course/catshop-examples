@@ -1,0 +1,106 @@
+# A BRANCH off ../2-plan-on-pr-apply-on-main — the same pipeline with the checks
+# that belong in front of `plan`. Read that one first; this is not the next step,
+# it is that step with three more rungs on the ladder.
+#
+# The diff against 2/pull-request.yml is the whole lesson: fmt, validate,
+# tflint, test — cheapest first, and each one catches something the one before
+# it cannot see.
+name: terraform-2a-pull-request
+
+on:
+  pull_request:
+    paths:
+      - "terraform/2a-checks-before-the-plan/**"
+      - "app/**"
+
+permissions:
+  contents: read
+  pull-requests: write   # only so the plan can be posted as a comment
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: terraform/2a-checks-before-the-plan
+
+    env:
+      TF_IN_AUTOMATION: "1"
+      # The only secret in this pipeline. It reaches one workspace and has no
+      # billing attached to it.
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      TF_VAR_docker_host: unix:///var/run/docker.sock
+      TF_VAR_port: "8080"
+      TF_VAR_name: catshop-ci
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Cheapest check first: formatting cannot fail interestingly, so it runs
+      # before anything downloads a provider.
+      - run: terraform fmt -check -recursive -diff
+
+      - run: terraform init -input=false
+      - run: terraform validate
+
+      # tflint has its own plugin to install, and it is a separate binary from
+      # terraform. It catches what validate cannot: an unused variable, a
+      # module source without a version, a deprecated interpolation.
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.53.0
+      - run: tflint --init
+      - run: tflint --format compact
+
+      # `terraform test` runs the plan-only assertions in stack.tftest.hcl.
+      # It needs the daemon, because planning a docker resource asks the
+      # provider — but it creates nothing.
+      - run: terraform test
+
+      # -out writes the plan as a FILE. Without it, "apply" later would compute
+      # a new plan against whatever the world looks like then — which is not
+      # the thing anybody reviewed.
+      #
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes.
+      - name: plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -out=tfplan
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" = 1 ] && exit 1
+          terraform show -no-color tfplan > plan.txt
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: |
+            terraform/2a-checks-before-the-plan/tfplan
+            terraform/2a-checks-before-the-plan/plan.txt
+          retention-days: 5
+
+      # The review artifact becomes the review. Nobody opens an artifact; a
+      # comment is already on the page they are reading.
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(
+              'terraform/2a-checks-before-the-plan/plan.txt', 'utf8');
+            const clipped = body.length > 60000
+              ? body.slice(0, 60000) + '\n...truncated, read the artifact'
+              : body;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '### terraform plan\n```hcl\n' + clipped + '\n```',
+            });

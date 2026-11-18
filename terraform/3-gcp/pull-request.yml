@@ -1,0 +1,74 @@
+# On a pull request: plan only, and no key anywhere.
+#
+# The job mints a short-lived token from GitHub, hands it to Google, and gets
+# back credentials for a service account. Nothing is stored. There is no secret
+# in this repository to leak, rotate or forget about.
+name: terraform-gcp-pull-request
+
+on:
+  pull_request:
+    paths: ["terraform/3-gcp/**"]
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Without this line the job cannot mint a token at all, and the auth step
+  # fails with a message about the audience. It is opt-in, per job, on purpose:
+  # the default is no credential.
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: terraform/3-gcp
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The exchange. GitHub signs a JWT whose `sub` says which repository and
+      # which ref asked; Google trusts that issuer and that exact `sub`, and
+      # returns a token good for an hour.
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # init reads the bucket. The credentials from the step above are already
+      # in the environment, so there is nothing to pass.
+      - run: terraform init -input=false
+      - run: terraform fmt -check -diff
+      - run: terraform validate
+      - run: terraform plan -input=false -no-color -out=tfplan
+
+      - run: terraform show -no-color tfplan > plan.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-gcp
+          path: terraform/3-gcp/tfplan
+          retention-days: 5
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('terraform/3-gcp/plan.txt', 'utf8');
+            const clipped = body.length > 60000
+              ? body.slice(0, 60000) + '\n...truncated, read the artifact'
+              : body;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '### terraform plan · gcp\n```hcl\n' + clipped + '\n```',
+            });

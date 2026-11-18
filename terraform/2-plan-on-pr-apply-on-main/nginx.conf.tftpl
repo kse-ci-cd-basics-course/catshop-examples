@@ -1,0 +1,38 @@
+# Rendered by templatefile(). The server lines come from the resource, so
+# raising var.replicas adds a backend here without anyone editing this file.
+
+upstream catshop {
+%{ for b in backends ~}
+    server ${b}:${app_port} max_fails=1 fail_timeout=5s;
+%{ endfor ~}
+}
+
+server {
+    listen 80;
+
+    # Which backend answered. nginx knows, so the application never has to be
+    # told it is one of several.
+    add_header X-Served-By $upstream_addr always;
+
+    location / {
+        proxy_pass http://catshop;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # A refused connection is an error, so nginx tries the next member
+        # instead of handing the client a 502.
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+
+        # These two are what make the line above arrive in time. A CONTAINER
+        # THAT IS GONE does not refuse connections - its address simply stops
+        # answering, and the default connect timeout is 60 SECONDS. Without
+        # this, every other request hangs until the client gives up, and the
+        # failover you configured never gets to run.
+        proxy_connect_timeout 2s;
+        proxy_read_timeout    5s;
+    }
+}

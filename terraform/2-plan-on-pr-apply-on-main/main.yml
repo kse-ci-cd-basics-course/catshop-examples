@@ -1,0 +1,91 @@
+# On main, the plan that was reviewed is the plan that is applied.
+#
+# Two jobs, and an artifact between them. The apply job never runs `plan`: it
+# consumes the saved file, so the bytes that were reviewed are the bytes that
+# change the world.
+name: terraform-2-main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/2-plan-on-pr-apply-on-main/**"
+      - "app/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Terraform takes a lock on the state for the length of an apply, and a second
+# apply waits for it. This block means the second RUN waits too, rather than
+# queueing against a lock it will time out on. Never cancel-in-progress here:
+# cancelling an apply half way through is how state and reality stop agreeing.
+concurrency:
+  group: terraform-apply-catshop
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: terraform/2-plan-on-pr-apply-on-main
+    env:
+      TF_IN_AUTOMATION: "1"
+      # The only secret in this pipeline. It reaches one workspace and has no
+      # billing attached to it.
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      TF_VAR_docker_host: unix:///var/run/docker.sock
+      TF_VAR_port: "8080"
+      TF_VAR_name: catshop-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - run: terraform init -input=false
+      - run: terraform plan -input=false -no-color -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-main
+          path: terraform/2-plan-on-pr-apply-on-main/tfplan
+          retention-days: 5
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-24.04
+    # A gate a person opens. The environment is also where the real credentials
+    # would live, so only this job could ever reach them.
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform/2-plan-on-pr-apply-on-main
+    env:
+      TF_IN_AUTOMATION: "1"
+      # The only secret in this pipeline. It reaches one workspace and has no
+      # billing attached to it.
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      TF_VAR_docker_host: unix:///var/run/docker.sock
+      TF_VAR_port: "8080"
+      TF_VAR_name: catshop-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-main
+          path: terraform/2-plan-on-pr-apply-on-main
+
+      # init again: this is a different machine with an empty folder. The plan
+      # file travelled; the .terraform directory did not, and a saved plan is
+      # only usable by the same provider versions that produced it.
+      - run: terraform init -input=false
+
+      # No -auto-approve, and no configuration argument. A saved plan is already
+      # approved by definition — that is what saving it meant.
+      - run: terraform apply -input=false tfplan

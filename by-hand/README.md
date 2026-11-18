@@ -29,18 +29,18 @@ gh workflow run by-hand-cache.yml && gh run watch
 (None of these are in `.github/workflows/`, so none of them run until you copy one
 there. Same rule as the `pipeline/` chapters.)
 
-## Where each one is used in the lecture
+## What each one shows
 
-- `checkout.yml` — §2, the runner. The machine starts empty; the token is the only
+- `checkout.yml` — **the runner.** The machine starts empty; the token is the only
   thing it is given.
-- `login.yml` — §4, the registry. The login is inside the job because the job is the
+- `login.yml` — **the registry.** The login is inside the job because the job is the
   only thing that exists, and a **fork PR gets a read-only token and no secrets**.
-- `buildx.yml` — §7, the layer cache. The prerequisite half of chapter 11, and the proof
+- `buildx.yml` — **the layer cache.** The prerequisite half of chapter 11, and the proof
   that the layer cache is the same store as the dependency cache.
-- `registry-push.yml` — §5 and §6. A manifest is a JSON file naming blobs; a tag is a key
+- `registry-push.yml` — **what a push actually is.** A manifest is a JSON file naming blobs; a tag is a key
   in the registry's table; a digest is the content. The push makes all three concrete.
-- `cache.yml` — §7, the cache. The fun-tier slide: *that is the whole action.*
-- `artifact.yml` — §7, cache **or** artifact. The rule is in one sentence at the top
+- `cache.yml` — **the cache**, and how little there is to it: *that is the whole action.*
+- `artifact.yml` — **cache or artifact.** The rule is in one sentence at the top
   of the file.
 
 ## The two honest caveats

@@ -2,11 +2,12 @@
 
 | | |
 |---|---|
-| `.github/` | **the pipeline that really runs here** — and the shape lab 2 asks for |
+| `.github/` | **the pipeline that really runs here** — and the shape to copy when you build your own |
 | `app/` | **the thing being built**: Flask app, tests, Dockerfiles, Compose stacks |
 | `pipeline/` | **the story** — one `ci.yml`, thirteen chapters, each caused by the pain of the one before |
 | `topics/` | **one file per question** — triggers, cache, concurrency, retry, reuse, environments, artifacts |
 | `by-hand/` | the same actions with the action **removed**, written as the HTTP it is |
+| `terraform/` | **deploying it** — the same stack five ways, from four verbs in your terminal to a reviewed plan applied on main |
 
 `docs/` is not an example — it is the site GitHub Pages serves, and the only reason it is
 here is that `topics/triggers-docs-pages.yml` subscribes to `docs/**` while the pipeline
@@ -25,18 +26,18 @@ git commit -am "demo: on main" && git push
 
 ```
 pull request   test ─> image (build, do not push) ─> qa
-push to main   test ─> publish (ghcr.io, by digest) ─> qa against what was published
+push to main   test ─> publish (ghcr.io, by digest) ─> qa ─> deploy (that digest)
 ```
 
 | File | What it is |
 |---|---|
 | `pull-request.yml` | every pull request. A red suite cannot reach the build; nothing is published |
-| `main.yml` | a merge is a different event on a different commit, and the only one allowed to publish. Tagged with the sha, never `latest`, labelled `org.opencontainers.image.revision`, and QA pulls **by digest** so what was checked is what shipped |
+| `main.yml` | a merge is a different event on a different commit, and the only one allowed to publish and to deploy. Tagged with the sha, never `latest`, labelled `org.opencontainers.image.revision`, and QA pulls **by digest** so what was checked is what shipped. The `deploy` job then hands that same digest to `terraform/3-gcp` — no stored key, the token is minted per run |
 | `_build-and-test.yml` | a reusable workflow. It lives here because one is **only callable from `.github/workflows/`** — nothing triggers it |
 | `actions/install-and-test` · `actions/qa` | composite actions: your own steps behind one `uses:`, on the caller's runner |
 
-**It caches nothing, on purpose.** That is the lab-2 shape: get it correct, watch how long
-it takes, then read `topics/cache-*` and `pipeline/10-cache-deps` and make it fast.
+**It caches nothing, on purpose.** Get it correct, watch how long it takes, then read
+`topics/cache-*` and `pipeline/10-cache-deps` and make it fast.
 
 **No chapter before `pipeline/10` caches anything either**, so the nine minutes chapter 10
-saves are a number the room has watched happen rather than a claim.
+saves are a number you can watch happen rather than a claim.

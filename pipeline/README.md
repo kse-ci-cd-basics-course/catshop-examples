@@ -21,7 +21,7 @@ it hurt.
 
 **No chapter before 10 caches anything, on purpose.** Chapters 01–09 download the same
 packages and rebuild the same layers every run, so the nine minutes in chapter 10 are a
-number the room has watched happen rather than a claim. Lifting one of these into a real
+number you can watch happen rather than a claim. Lifting one of these into a real
 pipeline? Add the cache back.
 
 **The diff is the lesson:**

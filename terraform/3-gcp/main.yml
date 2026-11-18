@@ -1,0 +1,77 @@
+# On main: the plan that was reviewed is the plan that is applied.
+name: terraform-gcp-main
+
+on:
+  push:
+    branches: [main]
+    paths: ["terraform/3-gcp/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# The bucket holds one lock for this prefix. Two applies cannot race; this makes
+# the second RUN wait rather than queue against a lock it will time out on.
+concurrency:
+  group: terraform-gcp-apply
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: terraform/3-gcp
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - run: terraform init -input=false
+      - run: terraform plan -input=false -no-color -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-gcp-main
+          path: terraform/3-gcp/tfplan
+          retention-days: 5
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-24.04
+    # A person opens this gate. It is also the only job that could ever reach
+    # production credentials, because environment secrets are scoped to it.
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform/3-gcp
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-gcp-main
+          path: terraform/3-gcp
+      # A different machine with an empty folder: the plan file travelled, the
+      # .terraform directory did not.
+      - run: terraform init -input=false
+      # No -auto-approve. Saving the plan was the approval.
+      - run: terraform apply -input=false tfplan
