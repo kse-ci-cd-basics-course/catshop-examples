@@ -1,6 +1,6 @@
 # by hand: docker/login-action
 #
-# The action is four lines of shell. What is worth the slide is not the login,
+# The action is four lines of shell. What is worth knowing is not the login,
 # it is WHERE the credential came from and what it is allowed to do.
 name: by-hand-login
 

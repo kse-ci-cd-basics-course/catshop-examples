@@ -77,8 +77,8 @@ jobs:
           CATSHOP_IMAGE: catshop:ci
         run: pytest app/tests/test_integration_db.py -q
 
-      # cold against warm. Paste both into the lab write-up - the grade is on
-      # the minutes saved, not on a cache: key being present.
+      # cold against warm. The number worth writing down is the minutes
+      # saved, not that a cache: key was present.
       - if: always()
         run: |
           {

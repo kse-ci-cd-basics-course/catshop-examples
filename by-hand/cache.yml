@@ -143,7 +143,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # /actions/caches is the MANAGEMENT api: list and delete, no bytes.
-          # This is the call the lab 2 grader makes to prove a cache exists.
+          # This is the call to make when you need to prove a cache exists.
           gh api "repos/$GITHUB_REPOSITORY/actions/caches" \
             --jq '.actions_caches[] | "\(.id)\t\(.key)\t\(.size_in_bytes) bytes\t\(.ref)"'
 

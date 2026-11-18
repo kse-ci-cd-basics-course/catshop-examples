@@ -6,7 +6,7 @@
 #
 # This is the other cache: the output of each layer, kept between runs.
 #
-# The matrix is the two Dockerfiles from lab 1, side by side, because the
+# The matrix is the two Dockerfiles in ../../app/, side by side, because the
 # difference between them is exactly what mode=max is for.
 #
 # NEW: cache-from/cache-to type=gha · mode=max vs the default min · `scope` so
@@ -82,7 +82,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The cache is only half of it. The Dockerfile decides what is cacheable at
-  # all, and lab 1 already asked for this ordering:
+  # all, and this ordering is why:
   #
   #     COPY requirements.txt .          <- changes rarely
   #     RUN  pip install -r requirements.txt
