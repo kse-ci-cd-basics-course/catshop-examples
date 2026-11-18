@@ -129,12 +129,41 @@ jobs:
 
       - run: terraform init -input=false
       - run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: the plan, in the run summary
+        run: |
+          counts=$(terraform show -json tfplan | python3 -c "
+          import json, sys
+          c = {'create': 0, 'update': 0, 'delete': 0}
+          for r in json.load(sys.stdin).get('resource_changes', []):
+              for a in r['change']['actions']:
+                  if a in c:
+                      c[a] += 1
+          print('%d to add, %d to change, %d to destroy' % (c['create'], c['update'], c['delete']))
+          ")
+
+          {
+            echo "## terraform plan"
+            echo
+            echo "**$counts**"
+            echo
+            echo '<details><summary>the whole plan</summary>'
+            echo
+            echo '```hcl'
+            terraform show -no-color tfplan | head -c 900000
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # On main this is automatic: the merge was the decision. A pull request
+      # has to be approved in the Actions tab instead — see pull-request.yml.
       - run: terraform apply -input=false tfplan
 
       - name: it answers on the public address
         run: |
           url="$(terraform output -raw url)"
-          echo "deployed: $url"
+          echo "- deployed to $url" >> "$GITHUB_STEP_SUMMARY"
           # The backends are unhealthy until the instances have pulled the
           # image and /health has replied twice, so this waits rather than
           # declaring failure on the first 502.

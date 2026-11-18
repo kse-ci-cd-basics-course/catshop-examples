@@ -1,8 +1,9 @@
 # THE PIPELINE — half one: every pull request.
 #
-# This is the finished thing, not a chapter. It is what lab 2 asks for, in the
-# shape the course recommends: test, then build the image to prove it still
-# builds, and run QA. Nothing is published from a pull request.
+# This is the finished thing, not a chapter: test, build the image to prove it
+# still builds, run QA, and check the infrastructure change the same way.
+# Nothing is published from a pull request, and nothing is applied without
+# somebody pressing a button.
 #
 # No cache anywhere in here on purpose — add one once you have read
 # ../../topics/cache-*.yml and ../../pipeline/10-cache-deps.
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - "app/**"
+      - "terraform/3-gcp-github-oidc/**"
       - ".github/workflows/pull-request.yml"
       - ".github/actions/**"
 
@@ -22,6 +24,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Only so the terraform jobs can mint a token for Google. It is opt-in per
+  # workflow and the default is no credential.
+  id-token: write
 
 jobs:
   test:
@@ -60,3 +65,121 @@ jobs:
         with:
           environment: sandbox
           host: ${{ vars.APP_HOST }}
+
+  # ── the infrastructure change, checked but not made ─────────────────────────
+  #
+  # Everything up to `plan` is free and needs no approval. The plan lands in the
+  # run's summary rather than in a comment, because a summary is attached to the
+  # run that produced it and cannot drift from it.
+  terraform-plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/3-gcp-github-oidc
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          # The wrapper normalises exit codes, and the step below reads one.
+          terraform_wrapper: false
+
+      # Cheapest first: formatting cannot fail interestingly and costs nothing.
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -input=false
+      - run: terraform validate
+
+      - name: plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: the plan, in the run summary
+        run: |
+          # The counts first, so the headline is readable without unfolding
+          # anything. The summary has a 1MB budget, hence the trim.
+          counts=$(terraform show -json tfplan | python3 -c "
+          import json, sys
+          c = {'create': 0, 'update': 0, 'delete': 0}
+          for r in json.load(sys.stdin).get('resource_changes', []):
+              for a in r['change']['actions']:
+                  if a in c:
+                      c[a] += 1
+          print('%d to add, %d to change, %d to destroy' % (c['create'], c['update'], c['delete']))
+          ")
+
+          {
+            echo "## terraform plan"
+            echo
+            echo "**$counts**"
+            echo
+            echo '<details><summary>the whole plan</summary>'
+            echo
+            echo '```hcl'
+            terraform show -no-color tfplan | head -c 900000
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The plan travels to the apply job as bytes. Re-planning there would
+      # apply something nobody looked at.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/3-gcp-github-oidc/tfplan
+          retention-days: 5
+
+  # ── and made, if a person says so ───────────────────────────────────────────
+  #
+  # Deploying a pull request is deliberate, never automatic. The `pr-deploy`
+  # environment carries a required reviewer, so this job sits and waits until
+  # somebody approves it in the Actions tab — that approval IS the manual step.
+  terraform-apply:
+    needs: [terraform-plan, qa]
+    runs-on: ubuntu-latest
+    environment: pr-deploy
+    defaults:
+      run:
+        working-directory: terraform/3-gcp-github-oidc
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/3-gcp-github-oidc
+
+      # A different machine with an empty folder: the plan file travelled, the
+      # .terraform directory did not.
+      - run: terraform init -input=false
+
+      # No -auto-approve and no configuration argument. A saved plan is already
+      # approved — that is what saving it meant.
+      - run: terraform apply -input=false tfplan
+
+      - name: where it landed
+        run: |
+          echo "- deployed to $(terraform output -raw url)" >> "$GITHUB_STEP_SUMMARY"

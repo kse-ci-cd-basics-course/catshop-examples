@@ -25,14 +25,15 @@ git commit -am "demo: on main" && git push
 ## The pipeline that runs
 
 ```
-pull request   test ─> image (build, do not push) ─> qa
-push to main   test ─> publish (ghcr.io, by digest) ─> qa ─> deploy (that digest)
+pull request   test ─> image (build, do not push) ─> qa ─┐
+               terraform fmt/validate/plan ─────────────┴─> apply  (waits for a person)
+push to main   test ─> publish (ghcr.io, by digest) ─> qa ─> deploy (that digest, automatic)
 ```
 
 | File | What it is |
 |---|---|
-| `pull-request.yml` | every pull request. A red suite cannot reach the build; nothing is published |
-| `main.yml` | a merge is a different event on a different commit, and the only one allowed to publish and to deploy. Tagged with the sha, never `latest`, labelled `org.opencontainers.image.revision`, and QA pulls **by digest** so what was checked is what shipped. The `deploy` job then hands that same digest to `terraform/3-gcp-github-oidc` — no stored key, the token is minted per run |
+| `pull-request.yml` | every pull request. A red suite cannot reach the build, nothing is published, and the terraform **plan lands in the run summary**. Applying from a pull request is possible and deliberate: the `pr-deploy` environment holds the job until somebody approves it |
+| `main.yml` | a merge is a different event on a different commit, and the only one allowed to publish and to deploy. Tagged with the sha, never `latest`, labelled `org.opencontainers.image.revision`, and QA pulls **by digest** so what was checked is what shipped. The `deploy` job then hands that same digest to `terraform/3-gcp-github-oidc` and applies automatically — the merge was the decision. No stored key; the token is minted per run |
 | `_build-and-test.yml` | a reusable workflow. It lives here because one is **only callable from `.github/workflows/`** — nothing triggers it |
 | `actions/install-and-test` · `actions/qa` | composite actions: your own steps behind one `uses:`, on the caller's runner |
 
