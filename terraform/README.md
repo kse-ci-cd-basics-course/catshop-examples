@@ -6,7 +6,7 @@ runs Terraform**, and **who keeps the state**.
 | | | runs `apply` | keeps the state | credential to the cloud | stored in the repo |
 |---|---|---|---|---|---|
 | **1** | `1-the-minimum` | a GitHub runner | HCP | none — it is the Docker socket | **an HCP token** |
-| **2** | `2-gcp-hcp-applies` | **HCP** | HCP | HCP → Google | **nothing** |
+| **2** | `2-gcp-hcp-applies` | **HCP** | HCP | HCP → Google | **nothing**, not even a backend block |
 | **3** | `3-gcp-github-oidc` | a GitHub runner | **a GCS bucket** | OIDC → Workload Identity | **nothing** |
 
 Model 1 is a mock environment on purpose: the provider is `kreuzwerker/docker`, so the
@@ -40,29 +40,31 @@ deployed on the commit, in parallel with your pipeline — so it applies whether
 tests passed. `2-gcp-hcp-applies/README.md` has the detail; it is the strongest reason the
 taught default is model 3.
 
-## The stack never changes
+## What each one actually builds
 
 ```bash
-md5 1-the-minimum/main.tf 1a-*/main.tf 1b-*/main.tf        # one hash
-md5 2-gcp-hcp-applies/network.tf 3-gcp-github-oidc/network.tf   # one hash
+md5 1-the-minimum/main.tf 1a-*/main.tf 1b-*/main.tf   # one hash: model 1's stack never changes
 ```
 
-Models 2 and 3 are the same Google configuration byte for byte. The only difference is one
-file — `cloud.tf` against `backend.tf` — plus whether there is a workflow beside it.
+Model 3 is the architecture. Model 2 is deliberately **one bucket** — it answers "who runs
+Terraform", and a bucket answers that as well as seventy dollars a month of infrastructure
+does, while staying cheap enough to leave running.
 
 ```
-localhost:8080 ──▶ nginx ──┬──▶ app-0 ──┐          model 1
-                           └──▶ app-1 ──┴──▶ postgres
+model 1   localhost:8080 ──▶ nginx ──┬──▶ app-0 ──┐
+                                     └──▶ app-1 ──┴──▶ postgres
 
-a global IP ──▶ load balancer ──┬──▶ instance ──┐  models 2 and 3
-                                └──▶ instance ──┴──▶ Cloud SQL
+model 2   one bucket, one label                     (the mechanism, not the shape)
+
+model 3   a global IP ──▶ load balancer ──┬──▶ instance ──┐
+                                          └──▶ instance ──┴──▶ Cloud SQL
 ```
 
 The application is `../app` — the same `app.py` as every other example here, byte for byte.
 It is never told it is one of several: nginx reports which backend answered in
 `X-Served-By`. The application did not change to be load balanced; its composition did.
 
-## Before model 1 or 3: one free account, five clicks
+## Before model 1: one free account, five clicks
 
 No credit card, one account each — the free plan's user limit per organization is small, so
 share an organization and you will run out of seats.
